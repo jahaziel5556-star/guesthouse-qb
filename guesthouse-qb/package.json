@@ -1,21 +1,25 @@
 {
-  "name": "guesthouse-qb",
+  "name": "guesthouse-qb-backend",
   "version": "1.0.0",
-  "description": "",
+  "description": "Backend server for Guesthouse QuickBooks + Firestore reservation system",
   "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "type": "commonjs",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
   "dependencies": {
-    "axios": "^1.13.2",
-    "body-parser": "^2.2.0",
+    "axios": "^1.6.7",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
-    "express": "^5.1.0",
-    "open": "^8.4.2"
-  }
+    "express": "^4.21.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  },
+  "engines": {
+    "node": ">=18.x"
+  },
+  "author": "",
+  "license": "ISC"
 }
