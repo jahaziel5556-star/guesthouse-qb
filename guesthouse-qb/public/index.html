@@ -1,0 +1,966 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Guest House Reservation System</title>
+  <!-- CropperJS -->
+<link  href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js"></script>
+  <style>
+    /* [ ... same styling as yours, untouched for visual consistency ... ] */
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #2e2e2e;
+      color: #f4f4f4;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+    }
+
+    h1 {
+      text-align: center;
+      margin-top: 20px;
+      color: #ffffff;
+    }
+
+    .main-buttons {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      margin: 40px 0;
+      align-items: center;
+    }
+
+    button {
+      font-size: 18px;
+      padding: 14px 28px;
+      cursor: pointer;
+      border: none;
+      border-radius: 8px;
+      background: #4a90e2;
+      color: white;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+      transition: background 0.3s ease;
+    }
+
+    button:hover {
+      background: #357ab7;
+    }
+
+    .modal {
+      display: none;
+      position: fixed;
+      z-index: 1000;
+      left: 0;
+      top: 0;
+      width: 100vw;
+      height: 100vh;
+      overflow: auto;
+      background-color: rgba(0,0,0,0.4);
+      padding-top: 60px;
+    }
+
+    .modal-content {
+      background-color: #ffffff;
+      color: #000000;
+      margin: 5% auto;
+      padding: 20px;
+      width: 90%;
+      max-width: 600px;
+      border-radius: 8px;
+      box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+    }
+
+    .close {
+      color: #aaa;
+      float: right;
+      font-size: 28px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    .close:hover {
+      color: red;
+    }
+
+    label, input, select {
+      display: block;
+      width: 100%;
+      margin-bottom: 10px;
+      font-size: 16px;
+    }
+
+    input[type="text"],
+    input[type="date"],
+    input[type="tel"],
+    input[type="number"],
+    input[type="email"],
+    select {
+      padding: 8px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      background: #f4f4f4;
+      color: #000000;
+    }
+
+    .modal-footer {
+      margin-top: 20px;
+      text-align: right;
+    }
+
+    .modal-footer button {
+      margin-left: 10px;
+    }
+
+    #availabilityGrid table {
+      border-collapse: collapse;
+      width: 100%;
+    }
+
+    #availabilityGrid th,
+    #availabilityGrid td {
+      border: 1px solid #333;
+      padding: 6px;
+      text-align: center;
+      color: #000;
+    }
+
+    #availabilityGrid th {
+      background-color: #eee;
+    }
+
+    .payment-box {
+      background: #fff;
+      color: #000;
+      padding: 20px;
+      border-radius: 8px;
+      margin-top: 20px;
+    }
+
+    .payment-box h3 {
+      margin-top: 0;
+      font-size: 20px;
+    }
+
+    .payment-entry {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+
+    .payment-entry input {
+      width: 48%;
+      margin-bottom: 0;
+    }
+
+    .color-legend {
+      display: flex;
+      gap: 20px;
+      justify-content: center;
+      margin: 10px 0;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 14px;
+    }
+
+    .legend-color {
+      width: 20px;
+      height: 20px;
+      display: inline-block;
+      border-radius: 4px;
+    }
+
+    .paid-full {
+      background: green;
+    }
+
+    .paid-deposit {
+      background: orange;
+    }
+    /* 🔧 Fix preview modal styling */
+#registrationFormPreviewModal .modal-content {
+  box-shadow: none !important;
+  background: transparent !important;
+  padding: 0;
+  margin: 0;
+  border: none !important;
+}
+
+   @media print {
+  #formPreviewContent {
+    width: 8.5in;
+    height: 5.4in;
+    padding: 0.3in;
+    box-sizing: border-box;
+  }
+
+  .registration-form {
+    width: 100%;
+    height: 100%;
+    font-size: 12px;
+    line-height: 1.35;
+  }
+}
+/* 🖨️ Print Settings */
+@media print {
+  body * {
+    visibility: hidden !important;
+  }
+
+  #registrationFormPreviewModal,
+  #registrationFormPreviewModal * {
+    visibility: visible !important;
+  }
+
+  #registrationFormPreviewModal {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    box-shadow: none !important;
+    background: white;
+    padding: 0;
+    margin: 0;
+  }
+
+  .modal-footer,
+  button,
+  .modal-background,
+  .modal-content:not(#formPreviewContent) {
+    display: none !important;
+  }
+
+  #formPreviewContent {
+    display: block;
+    width: 8.5in;
+    height: 11in;
+    margin: 0 auto;
+    padding: 0;
+    box-sizing: border-box;
+    page-break-inside: avoid;
+  }
+
+  .registration-form {
+    width: 100%;
+    height: 5.4in;
+    padding: 0.2in;
+    box-sizing: border-box;
+    border: none !important;
+    page-break-inside: avoid;
+  }
+  body * {
+      visibility: hidden !important;
+    }
+    #printableInvoiceContainer, #printableInvoiceContainer * {
+      visibility: visible !important;
+    }
+    #printableInvoiceContainer {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: auto;
+      page-break-after: avoid;
+      padding: 40px;
+      box-sizing: border-box;
+    }
+
+    @page {
+      size: A4 portrait;
+      margin: 0;
+    }
+ 
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+    }
+}
+  </style>
+</head>
+<body>
+ <header class="gh-header">
+  <div class="brand">
+    <div>
+      <h1 class="brand-title">Glimbaro Guest House</h1>
+      <p class="brand-sub">Reservation & Front-desk Dashboard</p>
+    </div>
+  </div>
+
+  <nav class="top-actions" role="navigation" aria-label="Primary actions">
+    <div class="quick-btns">
+      <button id="openAddReservationBtn" class="action primary">➕ Add</button>
+      <button id="showAvailabilityBtn" class="action">📅 Availability</button>
+      <button id="checkInOutBtn" class="action">🛎 Check-In/Out</button>
+      <button id="searchCustomerBtn" class="action">🔍 Customer</button>
+    </div>
+
+    <div class="search-wrap">
+      <input id="globalSearch" type="search" placeholder="Search name / receipt / room..." />
+      <button id="globalSearchBtn" class="icon-btn">🔎</button>
+    </div>
+
+    <div class="right-controls">
+      <button id="summaryBtn" class="chip">📊 Summary</button>
+      <button id="printReceiptsBtn" class="chip">🧾 Print</button>
+    </div>
+  </nav>
+</header>
+
+<main class="dashboard">
+  <section class="cards">
+    <article class="card stat">
+      <h3 id="card_totalReservations">—</h3>
+      <p>Total Reservations</p>
+    </article>
+    <article class="card stat">
+      <h3 id="card_todayCheckins">—</h3>
+      <p>Today's Check-ins</p>
+    </article>
+    <article class="card stat">
+      <h3 id="card_availableRooms">—</h3>
+      <p>Rooms Available</p>
+    </article>
+    <article class="card stat ">
+      <h3 id="card_balanceDue">—</h3>
+      <p>Total Balance Due</p>
+    </article>
+  </section>
+
+  <section class="quick-panels">
+    <div class="panel">
+      <header>
+        <h4>Quick Actions</h4>
+        <small>One-click tasks</small>
+      </header>
+      <div class="panel-body">
+        <button class="panel-btn" id="openAddReservationBtn-duplicate" onclick="document.getElementById('openAddReservationBtn').click();">➕ New Reservation</button>
+        <button class="panel-btn" id="printReceiptsBtn-duplicate" onclick="document.getElementById('printReceiptsBtn').click();">🖨 Print Receipts</button>
+        <button class="panel-btn" id="searchReceiptBtn">🔎 Find Receipt</button>
+        <button class="panel-btn" id="showAvailabilityBtn-duplicate" onclick="document.getElementById('showAvailabilityBtn').click();">📊 Availability Grid</button>
+      </div>
+    </div>
+
+    <div class="panel recent">
+      <header>
+        <h4>Recent Reservations</h4>
+      </header>
+      <div class="panel-body">
+        <table class="table" id="recentReservationsTable" aria-describedby="recentReservations">
+          <thead>
+            <tr><th>Name</th><th>Room</th><th>Check-in</th><th>Check-out</th><th>Status</th></tr>
+          </thead>
+          <tbody>
+            <!-- JS will populate -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+  (function(){
+    const mapClicks = [
+      ['openAddReservationBtn-duplicate','openAddReservationBtn'],
+      ['showAvailabilityBtn-duplicate','showAvailabilityBtn'],
+      ['printReceiptsBtn-duplicate','printReceiptsBtn']
+    ];
+    mapClicks.forEach(([dup,orig])=>{
+      const d = document.getElementById(dup);
+      if(d) d.addEventListener('click',()=>{ const o=document.getElementById(orig); if(o) o.click(); });
+    });
+
+    const globalSearch = document.getElementById('globalSearch');
+    const globalSearchBtn = document.getElementById('globalSearchBtn');
+    globalSearchBtn.addEventListener('click', () => {
+      const q = globalSearch.value.trim();
+      if(!q) return alert('Type a name, receipt, or room to search.');
+      const receiptInput = document.getElementById('searchReceiptInput');
+      if(receiptInput && /^\d+$/.test(q)) {
+        receiptInput.value = q;
+        document.getElementById('submitSearchReceiptBtn')?.click();
+        return;
+      }
+      document.getElementById('searchCustomerBtn')?.click();
+    });
+
+    document.addEventListener('click', (e) => {
+      const tr = e.target.closest('tr[data-res-id]');
+      if(!tr) return;
+      const resId = tr.getAttribute('data-res-id');
+      const reservations = window._reservationsCache || [];
+      const res = reservations.find(r=> r.id === resId);
+      if(res) {
+        window.showEditDeletePopup?.(res);
+      }
+    });
+  })();
+</script>
+
+<style>
+:root{
+  --bg:#0f1720;
+  --card:#f8fafd;
+  --accent:#2a4d7a;
+  --muted:#94a3b8;
+  --glass: rgba(255,255,255,0.04);
+}
+body {
+  background: linear-gradient(180deg,#0f1720 0%, #15202b 100%);
+  color: #e6eef6;
+  margin:0;
+  font-family: "Inter", system-ui, Arial, sans-serif;
+  font-size: 1.05rem;
+}
+.gh-header { max-width:1200px; margin:20px auto; display:flex; align-items:center; justify-content:space-between; gap:18px; padding:20px; }
+.brand { display:flex; gap:14px; align-items:center; }
+.brand-logo { width:54px; height:54px; border-radius:8px; }
+.brand-title { margin:0; font-size:1.5rem; color:#fff; font-weight:600; }
+.brand-sub { margin:0; color:var(--muted); font-size:1rem; }
+.top-actions { display:flex; align-items:center; gap:14px; flex:1; justify-content:space-between; }
+.quick-btns { display:flex; gap:10px; flex-wrap:wrap; }
+.action { background:var(--glass); color:#fff; border:1px solid rgba(255,255,255,0.06); padding:12px 18px; font-size:1.05rem; border-radius:12px; cursor:pointer; }
+.action.primary{ background: linear-gradient(90deg,var(--accent), #3c6fb3); border:none; font-weight:600; }
+.chip{ background: rgba(255,255,255,0.03); border-radius:999px; padding:10px 14px; font-size:1rem; }
+.search-wrap { display:flex; align-items:center; gap:10px; margin-left:12px; }
+#globalSearch { padding:12px 14px; border-radius:10px; border:1px solid rgba(255,255,255,0.06); background:rgba(255,255,255,0.02); color:#fff; min-width:260px; font-size:1rem; }
+.icon-btn { padding:12px 14px; border-radius:8px; cursor:pointer; font-size:1.1rem; }
+main.dashboard{ max-width:1200px; margin: 10px auto 60px; padding: 0 18px; box-sizing:border-box; }
+.cards{ display:grid; grid-template-columns: repeat(4,1fr); gap:16px; margin-bottom:20px; }
+.card{ background: linear-gradient(180deg,#fff 0%, #f4f7fb 100%); color:#0b2a3a; padding:16px; border-radius:14px; }
+.card.stat h3{ margin:0; font-size:1.6rem; font-weight:700; }
+.card.stat p{ margin:8px 0 0; color:#3a5c72; font-size:1.05rem; }
+.card.accent{ background: linear-gradient(180deg,var(--accent), #3c6fb3); color:white; }
+.quick-panels{ display:grid; grid-template-columns: 1fr 1.6fr; gap:16px; }
+.panel{ background: rgba(255,255,255,0.03); border-radius:14px; padding:14px; color: #eaf4ff; }
+.panel header h4{ margin:0 0 4px 0; font-size:1.1rem; }
+.panel-body{ margin-top:10px; display:flex; gap:10px; flex-wrap:wrap; }
+.panel-btn{ background:transparent; border:1px solid rgba(255,255,255,0.06); padding:12px 14px; border-radius:12px; color:inherit; cursor:pointer; min-width:160px; text-align:center; font-size:1.05rem; }
+.recent .table{ width:100%; color:#0b2a3a; background:white; border-radius:10px; overflow:hidden; }
+.recent table th, .recent table td{ font-size:1rem; padding:12px; border-bottom:1px solid #eee; }
+.recent tbody tr:hover{ background:#f3f7fb; cursor:pointer; }
+@media (max-width:980px){ .cards{ grid-template-columns: repeat(2,1fr); } .quick-panels{ grid-template-columns:1fr; } #globalSearch{ min-width:140px; } }
+@media (max-width:520px){ .brand-title{ font-size:1.2rem; } .cards{ grid-template-columns: 1fr; } }
+</style>
+<style>
+/* Make Total Balance Due label pop out */
+.balance-due-label {
+  color: #111 !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.5px;
+  font-size: 1.13em;
+  text-shadow: 0 1px 2px #fff6, 0 0px 0px #000a;
+}
+</style>
+
+    <!-- 🔲 Add Reservation Modal -->
+  <div id="addReservationModal" class="modal">
+    <div class="modal-content">
+      <span class="close" id="closeAddReservationBtn">&times;</span>
+      <h2>Add Reservation</h2>
+
+      <<label for="searchName">Search Customer:
+        <input type="text" id="searchName" placeholder="Start typing name..." autocomplete="off" />
+      </label>
+      <div id="suggestions"></div>
+
+      <!-- 🔹 Customer ID Preview -->
+      <div id="customerIdPreview" style="margin:10px 0; text-align:center;">
+        <span style="font-size:0.9em; color:#666;">No ID on file</span>
+      </div>
+
+      <label for="name">Name:
+        <input type="text" id="name" required />
+      </label>
+
+      <label for="address">Address:
+        <input type="text" id="address" required />
+      </label>
+
+      <label for="telephone">Telephone:
+        <input type="tel" id="telephone" required />
+      </label>
+
+      <label for="customer-email">Email:
+        <input type="email" id="customer-email" required />
+      </label>
+
+      <label for="specialOffer">Special Offer:
+        <select id="specialOffer">
+          <option value="">None</option>
+          <option value="2plus1">Pay for 2 Nights, Get 1 Free</option>
+          <option value="4plus3">Pay for 4 Nights, Get 3 Free</option>
+        </select>
+      </label>
+
+      <label for="arrival">Arrival Date:
+        <input type="date" id="arrival" required />
+      </label>
+
+      <label for="departure">Departure Date:
+        <input type="date" id="departure" required />
+      </label>
+
+      <label for="room">Room Number:
+        <input type="text" id="room" required />
+      </label>
+
+      <label for="reservationRate">Rate per Night:
+        <input type="number" id="reservationRate" min="0" step="0.01" required />
+      </label>
+
+      <label for="reservationNote">Note:
+        <textarea id="reservationNote" placeholder="Enter any special notes..." rows="3"></textarea>
+      </label>
+
+      <div class="modal-footer">
+        <button id="clearReservationFormBtn" 
+          style="background:#f44336;color:#fff;padding:8px 16px;border:none;border-radius:6px;font-size:1em;cursor:pointer;">
+          🧹 Clear Form
+        </button>
+        <button type="submit" id="saveReservationBtn">💾 Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 📊 Availability Grid Modal -->
+  <div id="availabilityModal" class="modal">
+    <div class="modal-content">
+      <span class="close" id="closeAvailabilityBtn">&times;</span>
+      <label for="startDate">Start Date:</label>
+      <input type="date" id="startDate" />
+      <label for="endDate">End Date:</label>
+      <input type="date" id="endDate" />
+      <div class="modal-footer">
+        <button id="loadGridBtn">Generate Grid</button>
+      </div>
+      <div id="availabilityGrid" style="margin-top: 20px;"></div>
+      <div class="modal-footer">
+        <button id="downloadCsvBtn">⬇ Download CSV</button>
+        <button id="printGridBtn">🖨️ Print</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ✏️ Edit Customer Modal -->
+<div id="editCustomerModal" class="modal">
+  <div class="modal-content">
+    <span class="close" id="closeEditCustomerBtn">&times;</span>
+    <h3>Edit Customer Information</h3>
+
+    <label for="editCustomerName">Name:</label>
+    <input type="text" id="editCustomerName" />
+
+    <label for="editCustomerPhone">Telephone:</label>
+    <input type="tel" id="editCustomerPhone" />
+
+    <label for="editCustomerAddress">Address:</label>
+    <input type="text" id="editCustomerAddress" />
+
+    <label for="editCustomerEmail">Email:</label>
+    <input type="email" id="editCustomerEmail" />
+
+    <div class="modal-footer">
+      <button id="saveCustomerEditBtn">💾 Save</button>
+      <button id="cancelCustomerEditBtn">Cancel</button>
+    </div>
+  </div>
+</div>
+
+  <!-- ✏️ Edit/Delete Popup Modal -->
+  <div id="editDeletePopup" class="modal">
+    <div class="modal-content" id="editDeleteContent">
+      <!-- Injected dynamically -->
+      <button id="printReservationBtn">🖨️ Print Reservation Form</button>
+      <button id="openExtendReservationBtn">➕ Extend Reservation</button>
+    </div>
+  </div>
+
+ <!-- 🛌 Extend Reservation Modal (single, shared modal) -->
+<div id="extendReservationModal" class="modal" style="z-index:2200;">
+  <div class="modal-content">
+    <span class="close" id="closeExtendReservationBtn">&times;</span>
+    <h3>Extend Reservation</h3>
+
+    <label for="extendDeparture">New Departure Date:
+      <input type="date" id="extendDeparture" required />
+    </label>
+
+    <label for="extendSpecialOffer">Special Offer:
+      <select id="extendSpecialOffer">
+        <option value="">None</option>
+        <option value="2plus1">Pay for 2 Nights, Get 1 Free</option>
+        <option value="4plus3">Pay for 4 Nights, Get 3 Free</option>
+      </select>
+    </label>
+
+    <label for="extendPaymentRate">Rate per Night:
+      <input type="number" id="extendPaymentRate" placeholder="Rate" />
+    </label>
+
+    <label for="extendPaymentAmount">Amount Being Paid:
+      <input type="number" id="extendPaymentAmount" placeholder="Amount" />
+    </label>
+
+    <label for="extendReceiptNumber">Receipt Number (Auto):
+      <input type="text" id="extendReceiptNumber" readonly />
+    </label>
+
+    <div class="modal-footer">
+  <button id="confirmExtendReservationBtn">💾 Confirm Extension</button>
+  <button id="cancelExtendReservationBtn">Cancel</button>
+</div>
+  </div>
+</div>
+
+
+  <!-- 💳 Payment Prompt Modal -->
+  <div id="paymentPromptModal" class="modal">
+    <div class="modal-content">
+      <span class="close" id="closePaymentPromptBtn">&times;</span>
+      <h3>Would you like to make a payment now?</h3>
+      <div class="modal-footer">
+        <button id="yesPaymentBtn">Yes</button>
+        <button id="noPaymentBtn">No</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 💰 Add Payment Modal -->
+  <div id="addPaymentModal" class="modal">
+    <div class="modal-content">
+      <span class="close" id="closeAddPaymentBtn">&times;</span>
+      <h3>Make a Payment</h3>
+
+      <label for="paymentAmount">Amount:
+  <input type="number" id="paymentAmount" step="0.01" placeholder="Enter amount" />
+</label>
+
+<label for="paymentMethod">Payment Method:
+  <select id="paymentMethod">
+    <option value="">Select method</option>
+    <option value="cash">Cash</option>
+    <option value="card">Card</option>
+    <option value="cheque">Cheque</option>
+    <option value="mobile">Mobile Banking</option>
+  </select>
+</label>
+
+<label for="previewReceiptNumber">Receipt Number (Auto):
+  <input type="text" id="previewReceiptNumber" readonly />
+</label>
+
+<div class="modal-footer">
+  <button id="confirmPaymentBtn">Confirm & Save</button>
+</div>
+
+    </div>
+  </div>
+<div id="summaryModal" class="modal" style="display:none;">
+  <div class="modal-content" style="max-width:900px;width:95%;">
+    <span id="closeSummaryModal" style="float:right;font-size:1.5em;cursor:pointer;">&times;</span>
+    <h2>Reservation / Payment Summary</h2>
+
+    <div style="margin-bottom:12px;">
+      <label>View:</label>
+<select id="summaryRange">
+  <option value="day">Today</option>
+  <option value="week">This Week</option>
+  <option value="month">This Month</option>
+  <option value="custom">Custom</option>
+  <option value="outstanding">Outstanding</option> 
+</select>
+
+      </select>
+      <input type="date" id="summaryStart" style="display:none;">
+      <input type="date" id="summaryEnd" style="display:none;">
+      <button id="loadSummaryBtn">Load Summary</button>
+      <button id="printSummaryBtn">🖨 Print</button>
+    </div>
+
+    <table id="summaryTable" border="1" cellpadding="5" cellspacing="0" style="width:100%;border-collapse:collapse;">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Receipt #</th>
+          <th>Date</th>
+          <th>Total Due</th>
+          <th>Total Paid</th>
+          <th>Balance</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <div id="summaryFooter" style="margin-top:15px;font-weight:bold;"></div>
+  </div>
+</div>
+
+  <!-- 🧾 Manage Payment Modal -->
+  <div id="managePaymentModal" class="modal">
+    <div class="modal-content">
+      <span class="close" id="closeManagePaymentBtn">&times;</span>
+      <h3>Manage Payments</h3>
+
+      <div class="payment-summary">
+        <p><strong>Total Paid:</strong> $<span id="totalPaid">0</span></p>
+        <p><strong>Balance Remaining:</strong> $<span id="balanceRemaining">0</span></p>
+      </div>
+
+      <div id="paymentHistoryList" style="margin-top: 10px;"></div>
+
+      <h4>Add Payment</h4>
+      <input type="text" id="paymentReceiptInput" placeholder="Receipt Number" />
+      <input type="number" id="paymentAmountInput" step="0.01" placeholder="Amount Paid" />
+
+      <div class="modal-footer">
+        <button id="savePaymentBtn">💾 Save Payment</button>
+        <button id="send-receipt-email-btn" class="popup-btn" style="background-color: #1f3d7a; color: white; margin-top: 10px;">
+        Send Receipt to Email
+        </button>
+        <button id="print-receipt-btn" style="margin-left: 10px;">🖨️ Print Receipt</button>
+        <button id="cancelPaymentBtn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+<!-- 🔽 Select Receipt for Email Modal -->
+<div id="selectReceiptModal" class="modal">
+  <div class="modal-content">
+    <span class="close" id="closeSelectReceiptModalBtn">&times;</span>
+    <h3>Select a Receipt to Email</h3>
+    <select id="receiptSelectDropdown">
+      <option value="">-- Select Receipt --</option>
+    </select>
+    <div class="modal-footer">
+      <button id="sendSelectedReceiptBtn">📧 Send</button>
+      <button id="cancelReceiptSelectBtn">Cancel</button>
+    </div>
+  </div>
+</div>
+<!-- 🖨️ Select Receipt for Printing -->
+<div id="printReceiptModal" class="modal">
+  <div class="modal-content">
+    <span class="close" id="closePrintReceiptModalBtn">&times;</span>
+    <h3>Select Receipt(s) to Print</h3>
+    <div id="printReceiptList"></div>
+    <div class="modal-footer" style="margin-top: 20px;">
+      <button id="confirmPrintReceiptBtn" style="background-color: #2a4d7a; color: white;">🖨️ Print</button>
+      <button id="cancelPrintReceiptBtn">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- 🔒 Hidden printable invoice container -->
+<div id="printableInvoiceContainer" style="display:none;"></div>
+
+  <!-- 🧾 Print Receipts Modal -->
+  <div id="printReceiptsModal" class="modal">
+    <div class="modal-content" style="max-width:420px;">
+      <h2 style="text-align:center;">🧾 Print Receipts</h2>
+      <div style="margin:20px 0;">
+        <div style="display:flex; flex-direction:column; gap:12px;">
+          <label style="display:flex; align-items:center; gap:0; margin-bottom:0; justify-content:flex-start;">
+            <input type="radio" name="receiptFilter" value="today" checked style="margin-right:12px; margin-left:0;">
+            <span style="flex:1;">Today</span>
+          </label>
+          <label style="display:flex; align-items:center; gap:0; margin-bottom:0; justify-content:flex-start;">
+            <input type="radio" name="receiptFilter" value="week" style="margin-right:12px; margin-left:0;">
+            <span style="flex:1;">This Week</span>
+          </label>
+          <label style="display:flex; align-items:center; gap:0; margin-bottom:0; justify-content:flex-start;">
+            <input type="radio" name="receiptFilter" value="month" style="margin-right:12px; margin-left:0;">
+            <span style="flex:1;">This Month</span>
+          </label>
+          <label style="display:flex; align-items:center; gap:0; margin-bottom:0; justify-content:flex-start;">
+            <input type="radio" name="receiptFilter" value="custom" style="margin-right:12px; margin-left:0;">
+            <span style="flex:1;">Custom Date Range</span>
+          </label>
+        </div>
+        <div id="customDateRange" style="margin-top:10px; display:none;">
+          <label>From: <input type="date" id="customStartDate"></label><br>
+          <label>To: <input type="date" id="customEndDate"></label>
+        </div>
+      </div>
+      <div class="modal-footer" style="text-align:right;">
+        <button id="generateReceiptsBtn">🖨 Generate</button>
+        <button id="closePrintReceiptsBtn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 🔍 Search Customer Modal -->
+  <div id="searchCustomerModal" class="modal">
+    <div class="modal-content">
+      <span class="close" id="closeSearchCustomerBtn">&times;</span>
+      <h2>Search Customer</h2>
+      <input type="text" id="customerSearchInput" placeholder="Search by name..." />
+      <div id="customerListContainer" style="margin-top: 10px; max-height: 300px; overflow-y: auto;"></div>
+      <div class="modal-footer">
+        <button id="confirmCustomerSelectionBtn">✅ Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 👤 Customer Details Modal -->
+  <div id="customerDetailsModal" class="modal">
+    <div class="modal-content">
+      <span class="close" id="closeCustomerDetailsBtn">&times;</span>
+      <h2>Customer Details</h2>
+      <div id="customerDetailFields">
+        <!-- Inject full name, phone, address, email, ID here -->
+      </div>
+      <div class="modal-footer">
+        <button id="editCustomerBtn">✏️ Edit</button>
+        <button id="viewCustomerTransactionsBtn">🧾Transactions</button>
+        <button id="viewCustomerReservationsBtn">📅Reservations</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 🧾 Transaction List Modal -->
+  <div id="transactionListModal" class="modal">
+    <div class="modal-content">
+      <span class="close" id="closeTransactionListBtn">&times;</span>
+      <h2>Customer Transactions</h2>
+      <div id="transactionListContainer" style="max-height: 300px; overflow-y: auto;"></div>
+    </div>
+  </div>
+
+  <!-- 📄 Receipt Detail Modal -->
+  <div id="receiptDetailModal" class="modal">
+    <div class="modal-content">
+      <span class="close" id="closeReceiptDetailBtn">&times;</span>
+      <h2>Receipt Details</h2>
+      <div id="receiptDetailContent"></div>
+    </div>
+  </div>
+
+  <!-- 🔍 Search Receipt Modal -->
+  <div id="searchReceiptModal" class="modal">
+    <div class="modal-content">
+      <span class="close" id="closeSearchReceiptBtn">&times;</span>
+      <h2>Search Receipt</h2>
+      <input type="text" id="searchReceiptInput" placeholder="Enter receipt number..." maxlength="5" />
+      <div class="modal-footer">
+        <button id="submitSearchReceiptBtn">🔎 Search</button>
+      </div>
+      <div id="searchReceiptError" style="color: red; margin-top: 10px; display: none;"></div>
+    </div>
+  </div>
+
+  <!-- 🛎 Check-In/Out Filter Modal -->
+  <div id="checkInOutFilterModal" class="modal">
+    <div class="modal-content">
+      <span class="close" id="closeCheckInOutFilterBtn">&times;</span>
+      <h2>Filter: Check-Ins / Check-Outs</h2>
+
+      <label>
+        <input type="radio" name="checkType" value="checkin" checked />
+        View Check-Ins
+      </label>
+      <label>
+        <input type="radio" name="checkType" value="checkout" />
+        View Check-Outs
+      </label>
+
+      <select id="checkInOutTimeFilter">
+        <option value="today">Today</option>
+        <option value="week">This Week</option>
+        <option value="custom">Custom Range</option>
+      </select>
+
+      <div id="customCheckDateRange" style="display:none;">
+        <label>From: <input type="date" id="customCheckStartDate"></label><br>
+        <label>To: <input type="date" id="customCheckEndDate"></label>
+      </div>
+
+      <div class="modal-footer">
+        <button id="applyCheckInOutFilterBtn">Apply Filter</button>
+      </div>
+
+      <div id="checkInOutResultsContainer" style="margin-top: 20px;"></div>
+    </div>
+  </div>
+  <!-- 🖨️ Registration Form Prompt Modal -->
+<div id="registrationPromptModal" class="modal">
+  <div class="modal-content">
+    <h3>Would you like to print the guest registration form?</h3>
+    <div class="modal-footer">
+      <button id="continueToIdUploadBtn">✅ Yes, Continue</button>
+      <button id="cancelRegistrationFlowBtn">❌ Cancel</button>
+    </div>
+  </div>
+</div>
+<!-- 🆔 ID Upload Modal -->
+<div id="idUploadModal" class="modal">
+  <div class="modal-content">
+    <h3>Please upload the guest's ID</h3>
+    <input type="file" id="idUploadInput" accept="image/*" />
+    <div class="modal-footer">
+      <button id="cancelIdUploadBtn">❌ Cancel</button>
+    </div>
+  </div>
+</div>
+<!-- ✂️ ID Cropping Modal -->
+<div id="idCropModal" class="modal">
+  <div class="modal-content">
+    <h3>Adjust the crop for the ID</h3>
+    <div style="text-align: center;">
+      <img id="idCropImage" style="max-width:100%; max-height:400px;" />
+    </div>
+    <div class="modal-footer">
+      <button id="cropAndContinueBtn">Crop & Continue</button>
+      <button id="cancelCropBtn">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- 📋 Registration Form Preview Modal -->
+<div id="registrationFormPreviewModal" class="modal">
+  <div class="modal-content" id="formPreviewContent" style="width:8.5in; height:5.5in; margin:auto;">
+    <!-- Filled dynamically by JS -->
+  </div>
+  <div class="modal-footer">
+    <button id="printRegistrationFormBtn">✅ Print Form</button>
+    <button id="cancelPreviewBtn">❌ Cancel</button>
+  </div>
+</div>
+<!-- JS dynamically fills this -->
+<div id="formPreviewContent" style="visibility: hidden;">Loading preview...</div>
+<div style="visibility: hidden;"><strong>Special Offer:</strong> {{specialOffer}} ></div> 
+
+<!-- 📧 Email Confirmation Modal -->
+<div id="emailConfirmationModal" class="modal" style="display:none;">
+  <div class="modal-content" style="max-width: 500px; margin: auto; padding: 24px; background: #fff; border-radius: 10px;">
+    <h3 style="margin-top: 0;">Reservation Confirmation</h3>
+    <div id="emailSummaryContent" style="margin-bottom: 20px;"></div>
+    <div class="modal-footer" style="text-align: right;">
+      <button id="sendEmailConfirmationBtn" style="background: #4caf50; color: white; padding: 10px 16px; border: none; border-radius: 6px; margin-right: 10px;">📤 Send Email Confirmation</button>
+      <button id="cancelEmailConfirmationBtn" style="background: #ccc; color: #000; padding: 10px 16px; border: none; border-radius: 6px;">❌ Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- 📑 Customer Reservations Modal -->
+<div id="customerReservationsModal" class="modal">
+  <div class="modal-content">
+    <span class="close" id="closeCustomerReservationsBtn">&times;</span>
+    <h3>Customer Reservations</h3>
+    <div id="customerReservationsList"></div>
+  </div>
+</div>
+  <script type="module" src="main1.js"></script>
+</body>
+</html>
