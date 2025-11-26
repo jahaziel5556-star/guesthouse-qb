@@ -1,15 +1,4 @@
-// index.js — QuickBooks backend (production-ready)
-/*
-  Requirements:
-  - Set environment variables (Render or locally):
-      CLIENT_ID
-      CLIENT_SECRET
-      REDIRECT_URI   (exact redirect used in QuickBooks app settings)
-      ENVIRONMENT    ("sandbox" or "production") — defaults to "sandbox"
-  - Ensure tokens.json & customers.json are writable by the process folder
-  - Delete tokens.json when switching environments or changing redirect URI / client keys
-*/
-
+// index.js - QuickBooks backend (production-ready)
 const express = require("express");
 const axios = require("axios");
 const fs = require("fs");
@@ -21,9 +10,9 @@ dotenv.config();
 
 const app = express();
 app.use(express.json());
-app.use(cors({ origin: true, credentials: true }));
+app.use(cors({ origin: true, credentials: true })); // adjust origin in production if needed
 
-// -------------------- environment / constants --------------------
+// -------------------- env + constants --------------------
 const ENV = (process.env.ENVIRONMENT || "sandbox").toLowerCase(); // "sandbox" or "production"
 const AUTH_BASE = "https://appcenter.intuit.com/connect/oauth2";
 const TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer";
@@ -43,24 +32,32 @@ const SCOPES = [
 const TOKEN_PATH = path.join(__dirname, "tokens.json");
 const CUSTOMER_MAP_PATH = path.join(__dirname, "customers.json");
 
-// small helper for logging
+// serve static UI if folder exists (public/)
+if (fs.existsSync(path.join(__dirname, "public"))) {
+  app.use(express.static(path.join(__dirname, "public")));
+} else {
+  // fallback to serve root index.html if present
+  if (fs.existsSync(path.join(__dirname, "index.html"))) {
+    app.use(express.static(__dirname));
+  }
+}
+
 function log(...args) {
   console.log(new Date().toISOString(), ...args);
 }
 
-// -------------------- helper: build auth URL --------------------
 function buildAuthUrl() {
+  if (!process.env.CLIENT_ID || !process.env.REDIRECT_URI) {
+    throw new Error("Missing CLIENT_ID or REDIRECT_URI in environment.");
+  }
   const state = Math.random().toString(36).substring(2, 12);
-  const authUrl =
-    `${AUTH_BASE}?client_id=${encodeURIComponent(process.env.CLIENT_ID)}` +
+  return `${AUTH_BASE}?client_id=${encodeURIComponent(process.env.CLIENT_ID)}` +
     `&redirect_uri=${encodeURIComponent(process.env.REDIRECT_URI)}` +
-    `&response_type=code` +
-    `&scope=${encodeURIComponent(SCOPES)}` +
+    `&response_type=code&scope=${encodeURIComponent(SCOPES)}` +
     `&state=${encodeURIComponent(state)}`;
-  return authUrl;
 }
 
-// -------------------- helper: refresh / read token --------------------
+// -------------------- token management --------------------
 async function getAccessToken() {
   if (!fs.existsSync(TOKEN_PATH)) {
     throw new Error("Not authenticated with QuickBooks (tokens.json not found).");
@@ -68,8 +65,8 @@ async function getAccessToken() {
 
   const tokens = JSON.parse(fs.readFileSync(TOKEN_PATH, "utf8"));
 
-  // still valid
-  if (Date.now() < tokens.expires_at - 5000) {
+  // if token still valid (small safety margin)
+  if (Date.now() < (tokens.expires_at || 0) - 5000) {
     return tokens;
   }
 
@@ -82,14 +79,10 @@ async function getAccessToken() {
 
     const response = await axios.post(TOKEN_URL, params.toString(), {
       headers: {
-        Authorization:
-          "Basic " +
-          Buffer.from(
-            `${process.env.CLIENT_ID}:${process.env.CLIENT_SECRET}`
-          ).toString("base64"),
-        "Content-Type": "application/x-www-form-urlencoded",
+        Authorization: "Basic " + Buffer.from(`${process.env.CLIENT_ID}:${process.env.CLIENT_SECRET}`).toString("base64"),
+        "Content-Type": "application/x-www-form-urlencoded"
       },
-      timeout: 15000,
+      timeout: 15000
     });
 
     const resData = response.data;
@@ -98,46 +91,46 @@ async function getAccessToken() {
       access_token: resData.access_token,
       refresh_token: resData.refresh_token || tokens.refresh_token,
       expires_at: Date.now() + (resData.expires_in || 3600) * 1000,
-      // keep realmId (should remain same)
-      realmId: tokens.realmId || resData.realmId,
+      realmId: tokens.realmId || resData.realmId
     };
 
     fs.writeFileSync(TOKEN_PATH, JSON.stringify(updated, null, 2));
-    log("Refreshed QuickBooks token, expires_at:", new Date(updated.expires_at).toISOString());
+    log("Refreshed token, expires_at:", new Date(updated.expires_at).toISOString());
     return updated;
   } catch (err) {
-    // Bubble up a helpful error
-    const details = err.response?.data || err.message || err;
+    const details = err.response?.data || err.message || String(err);
     log("Token refresh failed:", details);
-    // If refresh failed with invalid_grant, token is invalid — delete tokens.json to force re-auth
+    // If the refresh token is invalid, delete tokens.json so operator can re-authorize
+    if (JSON.stringify(details).includes("invalid_grant") || JSON.stringify(details).includes("invalid_grant")) {
+      try { fs.unlinkSync(TOKEN_PATH); log("Deleted tokens.json (invalid_grant). Re-authorize via /auth"); } catch(e){}
+    }
     throw new Error(`Token refresh failed: ${JSON.stringify(details)}`);
   }
 }
 
-// -------------------- ROUTES --------------------
+// -------------------- routes --------------------
 
-// Health check (optional)
+// health check
 app.get("/health", (req, res) => res.json({ ok: true, env: ENV }));
 
-// Auth: show a simple link so admins can initiate authorization
+// auth link (admin uses this to start authorization)
 app.get("/auth", (req, res) => {
-  if (!process.env.CLIENT_ID || !process.env.CLIENT_SECRET || !process.env.REDIRECT_URI) {
-    return res.status(500).send("Missing CLIENT_ID, CLIENT_SECRET or REDIRECT_URI in environment.");
+  try {
+    const url = buildAuthUrl();
+    res.send(`<h2>QuickBooks Authorization (${ENV})</h2>
+      <p><a href="${url}" target="_blank">Click here to authorize QuickBooks</a></p>
+      <p>Redirect URI: <code>${process.env.REDIRECT_URI}</code></p>
+      <p><small>Make sure you log in as the company admin (sandbox admin for sandbox).</small></p>`);
+  } catch (err) {
+    res.status(500).send(String(err.message || err));
   }
-  const url = buildAuthUrl();
-  res.send(`
-    <h2>QuickBooks Authorization (${ENV})</h2>
-    <p><a href="${url}" target="_blank">Click here to authorize QuickBooks</a></p>
-    <p>Redirect URI: <code>${process.env.REDIRECT_URI}</code></p>
-    <p><small>Make sure you login as the company ADMIN (sandbox admin for sandbox).</small></p>
-  `);
 });
 
-// OAuth callback — QuickBooks will redirect here
+// OAuth callback that QuickBooks will call
 app.get("/callback", async (req, res) => {
   const { code, realmId } = req.query;
   if (!code || !realmId) {
-    log("Callback missing code or realmId:", req.query);
+    log("Callback missing code or realmId", req.query);
     return res.status(400).send("Missing code or realmId");
   }
 
@@ -145,17 +138,15 @@ app.get("/callback", async (req, res) => {
     const params = new URLSearchParams({
       grant_type: "authorization_code",
       code,
-      redirect_uri: process.env.REDIRECT_URI,
+      redirect_uri: process.env.REDIRECT_URI
     });
 
     const response = await axios.post(TOKEN_URL, params.toString(), {
       headers: {
-        Authorization:
-          "Basic " +
-          Buffer.from(`${process.env.CLIENT_ID}:${process.env.CLIENT_SECRET}`).toString("base64"),
-        "Content-Type": "application/x-www-form-urlencoded",
+        Authorization: "Basic " + Buffer.from(`${process.env.CLIENT_ID}:${process.env.CLIENT_SECRET}`).toString("base64"),
+        "Content-Type": "application/x-www-form-urlencoded"
       },
-      timeout: 15000,
+      timeout: 15000
     });
 
     const data = response.data;
@@ -163,50 +154,47 @@ app.get("/callback", async (req, res) => {
       access_token: data.access_token,
       refresh_token: data.refresh_token,
       expires_at: Date.now() + (data.expires_in || 3600) * 1000,
-      realmId,
+      realmId
     };
 
     fs.writeFileSync(TOKEN_PATH, JSON.stringify(tokenData, null, 2));
-    log("Saved new tokens.json for realmId:", realmId);
-    res.send("✅ QuickBooks Authorized. You can now push payments. Close this window and return to the app.");
+    log("Saved tokens.json for realmId:", realmId);
+    res.send("✅ QuickBooks Authorized. You can close this window and return to the app.");
   } catch (err) {
-    const details = err.response?.data || err.message || err;
+    const details = err.response?.data || err.message || String(err);
     log("Callback token exchange failed:", details);
-    // Help user debug
     res.status(500).send(`❌ QuickBooks token exchange failed: ${JSON.stringify(details)}`);
   }
 });
 
-// Check token endpoint (frontend polls this)
+// frontend polls this to check login
 app.get("/check-token", (req, res) => {
   const loggedIn = fs.existsSync(TOKEN_PATH);
-  let authUrl = null;
-  if (!loggedIn) authUrl = buildAuthUrl();
+  const authUrl = loggedIn ? null : buildAuthUrl();
   res.json({ loggedIn, authUrl });
 });
 
-// Push payment to QuickBooks
+// push payment to QuickBooks
 app.post("/payment-to-quickbooks", async (req, res) => {
   try {
-    // Basic input validation
     const {
       name, email, phone, address, customerNumber,
       amount, receiptNumber, date, room, checkin, checkout, notes, specialOffer
     } = req.body || {};
 
+    // minimal validation
     if (!name || !email || !amount || !receiptNumber || !date) {
       return res.status(400).json({ error: "Missing required fields (name, email, amount, receiptNumber, date)" });
     }
 
     const tokens = await getAccessToken(); // may throw
-
     const config = {
       headers: {
         Authorization: `Bearer ${tokens.access_token}`,
         "Content-Type": "application/json",
-        Accept: "application/json",
+        Accept: "application/json"
       },
-      timeout: 20000,
+      timeout: 20000
     };
 
     // load or create customer map
@@ -215,7 +203,7 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       try {
         customerMap = JSON.parse(fs.readFileSync(CUSTOMER_MAP_PATH, "utf8"));
       } catch (e) {
-        log("Warning: customers.json parse failed, overwriting.");
+        log("Warning: customers.json parse failed; overwriting.");
         customerMap = {};
       }
     }
@@ -224,13 +212,12 @@ app.post("/payment-to-quickbooks", async (req, res) => {
     let customerId = customerMap[key];
 
     if (!customerId) {
-      // create customer
       const custBody = {
         DisplayName: name,
         PrimaryEmailAddr: email ? { Address: email } : undefined,
         PrimaryPhone: phone ? { FreeFormNumber: phone } : undefined,
         BillAddr: { Line1: address || "N/A" },
-        ResaleNum: customerNumber || "",
+        ResaleNum: customerNumber || ""
       };
 
       const custResp = await axios.post(`${API_BASE}${tokens.realmId}/customer`, custBody, config);
@@ -241,7 +228,7 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       log("Created QuickBooks customer:", customerId);
     }
 
-    // create sales receipt
+    // create sales receipt (ensure ItemRef value exists in company)
     const salesBody = {
       CustomerRef: { value: customerId },
       TxnDate: date,
@@ -265,27 +252,23 @@ app.post("/payment-to-quickbooks", async (req, res) => {
 
     res.json({ success: true, receiptId });
   } catch (err) {
-    const details = err.response?.data || err.message || err;
+    const details = err.response?.data || err.message || String(err);
     log("QuickBooks Error:", details);
-
-    // If the error indicates invalid_grant or incorrect client, include helpful advice
     let hint = null;
-    const errStr = JSON.stringify(details);
-    if (errStr.includes("invalid_grant") || errStr.includes("Incorrect") || errStr.includes("client")) {
-      hint = "Token/auth error — ensure CLIENT_ID/CLIENT_SECRET and REDIRECT_URI match QuickBooks app settings and tokens.json is for the correct environment. If you recently changed these, delete tokens.json and re-authorize at /auth.";
+    if (JSON.stringify(details).includes("invalid_grant") || JSON.stringify(details).includes("Incorrect") || JSON.stringify(details).includes("client")) {
+      hint = "Token/auth error — ensure CLIENT_ID/CLIENT_SECRET and REDIRECT_URI match QuickBooks app settings and tokens.json is for the correct environment. If you changed these, delete tokens.json and re-authorize at /auth.";
     }
-
-    res.status(500).json({
-      error: "Failed to push payment",
-      details,
-      hint
-    });
+    res.status(500).json({ error: "Failed to push payment", details, hint });
   }
 });
 
-// -------------------- start server --------------------
+// start
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   log(`🚀 Server running at http://localhost:${PORT}  (ENV=${ENV})`);
-  log(`🔑 Authorize QuickBooks here: ${buildAuthUrl()}`);
+  try {
+    log(`🔑 Authorize QuickBooks here: ${buildAuthUrl()}`);
+  } catch (e) {
+    log("Auth URL not available until CLIENT_ID/REDIRECT_URI are set in env.");
+  }
 });
