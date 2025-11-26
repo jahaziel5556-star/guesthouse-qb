@@ -18,7 +18,7 @@ app.use(cors({ origin: true, credentials: true }));
 //--------------------------------------------------------
 const authBase = "https://appcenter.intuit.com/connect/oauth2";
 const tokenUrl = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer";
-const apiBase = "https://sandbox-quickbooks.api.intuit.com/v3/company/";
+const apiBase = "https://quickbooks.api.intuit.com/v3/company/";
 
 const scopes = [
   "com.intuit.quickbooks.accounting",
@@ -257,3 +257,4 @@ app.listen(PORT, () => {
   console.log(`🚀 Server running at http://localhost:${PORT}`);
   console.log(`🔑 Login: http://localhost:${PORT}/auth`);
 });
+
