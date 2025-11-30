@@ -1,4 +1,4 @@
-// index.js - QuickBooks backend (accept taxCode/taxAgency in request, robust agency match, VAT fallback)
+// index.js - QuickBooks backend (tax inclusive, taxCode by Name/Agency, helper endpoints)
 const express = require("express");
 const axios = require("axios");
 const fs = require("fs");
@@ -36,9 +36,12 @@ const DEFAULT_ITEM_NAME = process.env.ITEM_NAME || "Accommodation";
 const ALLOW_ITEM_CREATE =
   (process.env.ALLOW_ITEM_CREATE || "true").toLowerCase() === "true";
 
-// Tax configuration
-const RAW_TAX_CODE = (process.env.QB_TAX_CODE || "").trim(); // preferred
-const RAW_TAX_AGENCY = (process.env.QB_TAX_AGENCY || "").trim(); // optional
+// Tax configuration (env, optional — frontend can also send taxAgency/taxCode)
+const RAW_TAX_CODE = (process.env.QB_TAX_CODE || "").trim();
+const RAW_TAX_AGENCY = (process.env.QB_TAX_AGENCY || "").trim();
+
+// Optional env to toggle inclusive/exclusive globally. Defaults to inclusive.
+const TAX_CALC = (process.env.TAX_CALC || "inclusive").toLowerCase(); // "inclusive" | "exclusive"
 
 // -------------------- CORS --------------------
 const ALLOWED_ORIGINS = (
@@ -238,11 +241,9 @@ async function resolveTaxCodeByAgency(tokens, agencyName) {
 
   const wanted = cleanAgencyName(raw);
 
-  // Load active codes
   const codesData = await qboQuery(tokens, "select * from TaxCode where Active = true maxresults 500");
   const codes = codesData.QueryResponse.TaxCode || [];
 
-  // Collect all TaxRate ids referenced
   const rateIds = new Set();
   for (const code of codes) {
     (code.TaxRateList?.TaxRateDetail || []).forEach(d => {
@@ -250,7 +251,7 @@ async function resolveTaxCodeByAgency(tokens, agencyName) {
       if (id) rateIds.add(id);
     });
   }
-  // Map rate id -> agency name (cleaned)
+
   const rateIdToAgency = new Map();
   for (const rid of rateIds) {
     const rateData = await qboQuery(tokens, `select * from TaxRate where Id = '${rid}'`);
@@ -259,7 +260,6 @@ async function resolveTaxCodeByAgency(tokens, agencyName) {
     if (agency) rateIdToAgency.set(rid, cleanAgencyName(agency));
   }
 
-  // Find any code that references a rate under the wanted agency (allow partial includes both ways)
   for (const code of codes) {
     const details = code.TaxRateList?.TaxRateDetail || [];
     const match = details.some(d => {
@@ -289,15 +289,10 @@ async function resolveAnyVATCode(tokens) {
 
 // Decide TaxCodeRef based on request or env, with VAT fallback
 async function resolveTaxCodeRef(tokens, { taxCode, taxAgency } = {}) {
-  // 1) Request body overrides
   if (taxCode) return await resolveTaxCodeByCode(tokens, taxCode);
   if (taxAgency) return await resolveTaxCodeByAgency(tokens, taxAgency);
-
-  // 2) Environment fallback
   if (RAW_TAX_CODE) return await resolveTaxCodeByCode(tokens, RAW_TAX_CODE);
   if (RAW_TAX_AGENCY) return await resolveTaxCodeByAgency(tokens, RAW_TAX_AGENCY);
-
-  // 3) Last resort: pick any VAT TaxCode
   return await resolveAnyVATCode(tokens);
 }
 
@@ -326,7 +321,7 @@ app.get("/tax-rates", async (_req, res) => {
   try {
     const tokens = await getAccessToken();
     const data = await qboQuery(tokens, "select * from TaxRate maxresults 500");
-    const rates = (data.QueryResponse.TaxRate || []).map(r => ({
+  const rates = (data.QueryResponse.TaxRate || []).map(r => ({
       Id: r.Id,
       Name: r.Name,
       Active: r.Active,
@@ -350,6 +345,7 @@ app.get("/health", (_req, res) => {
     allowItemCreate: ALLOW_ITEM_CREATE,
     taxCodeProvided: RAW_TAX_CODE || null,
     taxAgencyProvided: RAW_TAX_AGENCY || null,
+    taxCalcMode: TAX_CALC,
   });
 });
 
@@ -380,7 +376,10 @@ app.get("/callback", async (req, res) => {
     const resp = await axios.post(TOKEN_URL, params.toString(), {
       headers: {
         Authorization:
-          "Basic " + Buffer.from(`${process.env.CLIENT_ID}:${process.env.CLIENT_SECRET}`).toString("base64"),
+          "Basic " +
+          Buffer.from(
+            `${process.env.CLIENT_ID}:${process.env.CLIENT_SECRET}`
+          ).toString("base64"),
         "Content-Type": "application/x-www-form-urlencoded",
       },
     });
@@ -424,9 +423,10 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       checkin,
       checkout,
       notes,
-      // NEW: allow overrides from frontend if env not set
+      // Optional overrides from frontend
       taxCode,
       taxAgency,
+      taxCalc, // "inclusive" or "exclusive" if you ever want to override per request
     } = req.body;
 
     if (!name || !email || !amount || !date) {
@@ -472,13 +472,26 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       fs.writeFileSync(CUSTOMER_MAP_PATH, JSON.stringify(map, null, 2));
     }
 
+    // Tax calculation mode: inclusive by default or per request/env
+    const calcMode =
+      (taxCalc || TAX_CALC) === "exclusive" ? "TaxExcluded" : "TaxInclusive";
+
     const baseReceipt = {
       CustomerRef: { value: customerId },
       TxnDate: date, // yyyy-mm-dd
       PrivateNote: notes || "",
+
+      // GLOBAL TAX MODE: inclusive or exclusive
+      GlobalTaxCalculation: calcMode,
+
+      // Header-level tax code (lets QBO compute totals consistently)
+      TxnTaxDetail: {
+        TxnTaxCodeRef: { value: taxCodeRef.value },
+      },
+
       Line: [
         {
-          Amount: amount,
+          Amount: amount, // amount you pass should already include VAT when inclusive
           DetailType: "SalesItemLineDetail",
           Description: `Room: ${room || "-"} | Check-in: ${checkin || "-"} | Check-out: ${checkout || "-"}`,
           SalesItemLineDetail: {
