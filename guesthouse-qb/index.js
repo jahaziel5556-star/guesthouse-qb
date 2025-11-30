@@ -1,4 +1,4 @@
-// index.js - QuickBooks backend (UPDATED FOR PROPER CORS WITH CREDENTIALS)
+// index.js - QuickBooks backend (full version with robust CORS and QBO safeguards)
 const express = require("express");
 const axios = require("axios");
 const fs = require("fs");
@@ -13,8 +13,10 @@ app.use(express.json());
 
 // -------------------- CONFIG --------------------
 const ENV = (process.env.ENVIRONMENT || "production").toLowerCase();
+
 const AUTH_BASE = "https://appcenter.intuit.com/connect/oauth2";
 const TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer";
+
 const API_BASE =
   ENV === "production"
     ? "https://quickbooks.api.intuit.com/v3/company/"
@@ -32,8 +34,13 @@ const SCOPES = [
 const TOKEN_PATH = path.join(__dirname, "tokens.json");
 const CUSTOMER_MAP_PATH = path.join(__dirname, "customers.json");
 
+// Item/tax configuration
+const DEFAULT_ITEM_NAME = process.env.ITEM_NAME || "Accommodation";
+const ALLOW_ITEM_CREATE =
+  (process.env.ALLOW_ITEM_CREATE || "true").toLowerCase() === "true";
+const QB_TAX_CODE = process.env.QB_TAX_CODE || "NON"; // non-taxable code in many QBO companies
+
 // -------------------- CORS --------------------
-// Allowlist can come from env: CORS_ORIGINS=https://r-system-33a06.web.app,https://another.domain
 const ALLOWED_ORIGINS = (
   process.env.CORS_ORIGINS ||
   "https://r-system-33a06.web.app"
@@ -42,20 +49,19 @@ const ALLOWED_ORIGINS = (
   .map((s) => s.trim())
   .filter(Boolean);
 
-// Use cors with origin callback (no wildcard when credentials are true)
 app.use(
   cors({
-    origin: function (origin, callback) {
-      // Allow non-browser or same-origin requests (origin undefined in curl/postman)
-      if (!origin) return callback(null, true);
-      if (ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
-      return callback(new Error("CORS: Origin not allowed: " + origin));
+    origin(origin, cb) {
+      // Allow same-origin tools (like curl/postman) where origin may be undefined
+      if (!origin) return cb(null, true);
+      if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+      return cb(new Error("CORS: Origin not allowed: " + origin));
     },
     credentials: true,
   })
 );
 
-// Explicit preflight support for all routes
+// Preflight handler
 app.options("*", (req, res) => {
   const origin = req.headers.origin;
   if (origin && ALLOWED_ORIGINS.includes(origin)) {
@@ -65,12 +71,15 @@ app.options("*", (req, res) => {
       "Access-Control-Allow-Headers",
       "Origin, X-Requested-With, Content-Type, Accept, Authorization"
     );
-    res.header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
+    res.header(
+      "Access-Control-Allow-Methods",
+      "GET,POST,PUT,PATCH,DELETE,OPTIONS"
+    );
   }
-  return res.sendStatus(200);
+  res.sendStatus(200);
 });
 
-// Add a small middleware to set headers for normal (non-preflight) responses
+// Add CORS headers for normal requests
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   if (origin && ALLOWED_ORIGINS.includes(origin)) {
@@ -85,7 +94,7 @@ function log(...a) {
   console.log(new Date().toISOString(), ...a);
 }
 
-// -------------------- UTILS --------------------
+// -------------------- HELPERS --------------------
 function buildAuthUrl() {
   if (!process.env.CLIENT_ID || !process.env.REDIRECT_URI) {
     throw new Error("Missing CLIENT_ID or REDIRECT_URI");
@@ -99,14 +108,26 @@ function buildAuthUrl() {
   );
 }
 
-// -------------------- TOKENS --------------------
+async function qboQuery(tokens, q) {
+  const url = `${API_BASE}${tokens.realmId}/query?query=${encodeURIComponent(q)}`;
+  const resp = await axios.get(url, {
+    headers: {
+      Authorization: `Bearer ${tokens.access_token}`,
+      Accept: "application/json",
+    },
+  });
+  return resp.data;
+}
+
 async function getAccessToken() {
   if (!fs.existsSync(TOKEN_PATH))
     throw new Error("Not authenticated with QuickBooks.");
 
   const tokens = JSON.parse(fs.readFileSync(TOKEN_PATH, "utf8"));
+  // still valid?
   if (Date.now() < tokens.expires_at - 5000) return tokens;
 
+  // refresh
   try {
     const params = new URLSearchParams({
       grant_type: "refresh_token",
@@ -146,28 +167,88 @@ async function getAccessToken() {
   }
 }
 
-// -------------------- FIND CUSTOMER --------------------
-async function findCustomerByName(name, tokens) {
-  const safeName = name.replace(/'/g, "\\'");
-  const query = `select * from Customer where DisplayName='${safeName}'`;
-  const url = `${API_BASE}${tokens.realmId}/query?query=${encodeURIComponent(query)}`;
+// Customer helpers
+async function findCustomerByName(displayName, tokens) {
+  const data = await qboQuery(
+    tokens,
+    `select * from Customer where DisplayName='${displayName.replace(/'/g, "\\'")}'`
+  );
+  return data.QueryResponse.Customer?.[0] || null;
+}
 
-  const resp = await axios.get(url, {
+// Item helpers
+async function findItemByName(tokens, name) {
+  const data = await qboQuery(
+    tokens,
+    `select * from Item where Name = '${name.replace(/'/g, "\\'")}'`
+  );
+  return data.QueryResponse.Item?.[0] || null;
+}
+
+async function findAnyIncomeAccount(tokens) {
+  const data = await qboQuery(
+    tokens,
+    "select * from Account where AccountType = 'Income' maxresults 50"
+  );
+  const accounts = data.QueryResponse.Account || [];
+  return accounts[0] || null;
+}
+
+async function ensureItemRef(tokens) {
+  // Use explicit item id when provided (fastest and most reliable)
+  if (process.env.ITEM_REF_ID) {
+    return { value: String(process.env.ITEM_REF_ID), name: DEFAULT_ITEM_NAME };
+  }
+
+  // Try by name
+  let item = await findItemByName(tokens, DEFAULT_ITEM_NAME);
+  if (item) return { value: item.Id, name: item.Name };
+
+  // Create the item if allowed
+  if (!ALLOW_ITEM_CREATE) {
+    throw new Error(
+      `Item '${DEFAULT_ITEM_NAME}' not found and ALLOW_ITEM_CREATE=false`
+    );
+  }
+
+  const incomeAccount = await findAnyIncomeAccount(tokens);
+  if (!incomeAccount) {
+    throw new Error("No Income account found to assign created item.");
+  }
+
+  const url = `${API_BASE}${tokens.realmId}/item`;
+  const payload = {
+    Name: DEFAULT_ITEM_NAME,
+    Type: "Service",
+    IncomeAccountRef: { value: incomeAccount.Id, name: incomeAccount.Name },
+    TrackQtyOnHand: false,
+  };
+
+  const resp = await axios.post(url, payload, {
     headers: {
       Authorization: `Bearer ${tokens.access_token}`,
+      "Content-Type": "application/json",
       Accept: "application/json",
     },
   });
 
-  return resp.data.QueryResponse.Customer?.[0]?.Id || null;
+  item = resp.data.Item;
+  return { value: item.Id, name: item.Name };
 }
 
 // -------------------- ROUTES --------------------
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, env: ENV, allowedOrigins: ALLOWED_ORIGINS });
+  res.json({
+    ok: true,
+    env: ENV,
+    allowedOrigins: ALLOWED_ORIGINS,
+    itemName: DEFAULT_ITEM_NAME,
+    allowItemCreate: ALLOW_ITEM_CREATE,
+    taxCode: QB_TAX_CODE,
+  });
 });
 
-// AUTH START
+// Start OAuth flow
 app.get("/auth", (_req, res) => {
   try {
     const url = buildAuthUrl();
@@ -181,7 +262,7 @@ app.get("/auth", (_req, res) => {
   }
 });
 
-// CALLBACK
+// OAuth callback
 app.get("/callback", async (req, res) => {
   const { code, realmId } = req.query;
   if (!code || !realmId)
@@ -214,6 +295,7 @@ app.get("/callback", async (req, res) => {
 
     fs.writeFileSync(TOKEN_PATH, JSON.stringify(data, null, 2));
     log("QuickBooks Authorized. tokens.json saved.");
+
     res.send("✅ QuickBooks authorized successfully. You may close this tab.");
   } catch (err) {
     res
@@ -222,7 +304,7 @@ app.get("/callback", async (req, res) => {
   }
 });
 
-// CHECK TOKEN (used by frontend)
+// Token check for frontend
 app.get("/check-token", (_req, res) => {
   const loggedIn = fs.existsSync(TOKEN_PATH);
   try {
@@ -232,7 +314,7 @@ app.get("/check-token", (_req, res) => {
   }
 });
 
-// PAYMENT PUSH
+// Push payment -> SalesReceipt
 app.post("/payment-to-quickbooks", async (req, res) => {
   try {
     const {
@@ -243,38 +325,41 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       customerNumber,
       amount,
       receiptNumber,
-      date,
+      date, // yyyy-mm-dd
       room,
       checkin,
       checkout,
       notes,
     } = req.body;
 
-    if (!name || !email || !amount || !date || !receiptNumber) {
+    if (!name || !email || !amount || !date) {
       return res.status(400).json({ error: "Missing fields" });
     }
 
     const tokens = await getAccessToken();
-    const config = {
-      headers: {
-        Authorization: `Bearer ${tokens.access_token}`,
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
+
+    // Ensure sales item exists
+    const itemRef = await ensureItemRef(tokens);
+
+    // Find or create customer, cached by name+email
+    let map = fs.existsSync(CUSTOMER_MAP_PATH)
+      ? JSON.parse(fs.readFileSync(CUSTOMER_MAP_PATH, "utf8"))
+      : {};
+    const key = `${name}_${email}`.toLowerCase();
+    let customerId = map[key]?.toString();
+
+    const headers = {
+      Authorization: `Bearer ${tokens.access_token}`,
+      "Content-Type": "application/json",
+      Accept: "application/json",
     };
 
-    let map = fs.existsSync(CUSTOMER_MAP_PATH)
-      ? JSON.parse(fs.readFileSync(CUSTOMER_MAP_PATH))
-      : {};
-
-    const key = `${name}_${email}`.toLowerCase();
-    let customerId = map[key];
-
     if (!customerId) {
-      customerId = await findCustomerByName(name, tokens);
-
-      if (!customerId) {
-        const cust = await axios.post(
+      const found = await findCustomerByName(name, tokens);
+      if (found) {
+        customerId = found.Id;
+      } else {
+        const custResp = await axios.post(
           `${API_BASE}${tokens.realmId}/customer`,
           {
             DisplayName: name,
@@ -283,37 +368,63 @@ app.post("/payment-to-quickbooks", async (req, res) => {
             BillAddr: { Line1: address || "N/A" },
             ResaleNum: customerNumber || "",
           },
-          config
+          { headers }
         );
-        customerId = cust.data.Customer.Id;
+        customerId = custResp.data.Customer.Id;
       }
-
       map[key] = customerId;
       fs.writeFileSync(CUSTOMER_MAP_PATH, JSON.stringify(map, null, 2));
     }
 
-    const receipt = await axios.post(
-      `${API_BASE}${tokens.realmId}/salesreceipt`,
-      {
-        CustomerRef: { value: customerId },
-        TxnDate: date,
-        DocNumber: receiptNumber,
-        PrivateNote: notes || "",
-        Line: [
-          {
-            Amount: amount,
-            DetailType: "SalesItemLineDetail",
-            Description: `Room: ${room} | Check-in: ${checkin} | Check-out: ${checkout}`,
-            SalesItemLineDetail: {
-              ItemRef: { value: "6", name: "Accommodation" }, // Must exist in QB
-            },
+    // Build SalesReceipt
+    const baseReceipt = {
+      CustomerRef: { value: customerId },
+      TxnDate: date, // yyyy-mm-dd
+      PrivateNote: notes || "",
+      Line: [
+        {
+          Amount: amount,
+          DetailType: "SalesItemLineDetail",
+          Description: `Room: ${room || "-"} | Check-in: ${checkin || "-"} | Check-out: ${checkout || "-"}`,
+          SalesItemLineDetail: {
+            ItemRef: itemRef, // { value, name }
+            TaxCodeRef: { value: QB_TAX_CODE },
           },
-        ],
-      },
-      config
-    );
+        },
+      ],
+    };
 
-    res.json({ success: true, receiptId: receipt.data.SalesReceipt.Id });
+    // Include DocNumber if provided; may be rejected depending on company setting or duplicates
+    let payload = { ...baseReceipt };
+    if (receiptNumber) payload.DocNumber = String(receiptNumber);
+
+    const salesUrl = `${API_BASE}${tokens.realmId}/salesreceipt`;
+
+    async function createSalesReceipt(body) {
+      return axios.post(salesUrl, body, { headers });
+    }
+
+    let response;
+    try {
+      response = await createSalesReceipt(payload);
+    } catch (err) {
+      const detail = err.response?.data;
+      const msg = JSON.stringify(detail || err);
+      // Retry without DocNumber if the error mentions DocNumber or duplicates
+      if (payload.DocNumber && /DocNumber|Duplicate|duplicate/i.test(msg)) {
+        try {
+          const retryPayload = { ...baseReceipt }; // omit DocNumber
+          response = await createSalesReceipt(retryPayload);
+        } catch (retryErr) {
+          log("SalesReceipt retry (no DocNumber) failed:", retryErr.response?.data || retryErr);
+          throw retryErr;
+        }
+      } else {
+        throw err;
+      }
+    }
+
+    res.json({ success: true, receiptId: response.data.SalesReceipt.Id });
   } catch (err) {
     log("QuickBooks Error:", err.response?.data || err);
     res.status(500).json({
