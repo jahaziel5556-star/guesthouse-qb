@@ -1,4 +1,4 @@
-// index.js - QuickBooks backend (Amounts explicitly treated as tax-inclusive; returns net + tax breakdown)
+// index.js - QuickBooks backend (force tax-inclusive totals; explicit TotalTax to prevent double add)
 const express = require("express");
 const axios = require("axios");
 const fs = require("fs");
@@ -8,7 +8,7 @@ const dotenv = require("dotenv");
 
 dotenv.config();
 
-const app = express(); // FIX: removed (A)
+const app = express();
 app.use(express.json());
 
 // -------------------- CONFIG --------------------
@@ -40,10 +40,8 @@ const ALLOW_ITEM_CREATE =
 const RAW_TAX_CODE = (process.env.QB_TAX_CODE || "").trim();
 const RAW_TAX_AGENCY = (process.env.QB_TAX_AGENCY || "").trim();
 
-// Force inclusive amounts globally unless overridden per request
+// Default: treat incoming amounts as tax-inclusive
 const TAX_CALC = (process.env.TAX_CALC || "inclusive").toLowerCase(); // inclusive | exclusive
-
-// If set, we always treat incoming amount as gross (tax-inclusive) and compute net
 const ALWAYS_INCLUSIVE = (process.env.ALWAYS_INCLUSIVE || "true").toLowerCase() === "true";
 
 // -------------------- CORS --------------------
@@ -441,7 +439,7 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       notes,
       taxCode,
       taxAgency,
-      taxCalc,
+      taxCalc, // optional override
     } = req.body;
 
     if (!name || !email || !amount || !date) {
@@ -456,18 +454,21 @@ app.post("/payment-to-quickbooks", async (req, res) => {
     const tokens = await getAccessToken();
     const itemRef = await ensureItemRef(tokens);
     const taxCodeRef = await resolveTaxCodeRef(tokens, { taxCode, taxAgency });
-    const taxCodeFull = taxCodeRef._full;
-    const combinedRate = extractCombinedRate(taxCodeFull);
+    const taxCodeFull = taxCodeRef._full; // may contain detailed rate info
+    const combinedRate = extractCombinedRate(taxCodeFull); // percent
 
+    // Compute net & tax from gross for inclusive pricing
     let netAmount = grossAmount;
     let taxAmount = 0;
     const modeRequested = (taxCalc || TAX_CALC).toLowerCase();
     const inclusive = ALWAYS_INCLUSIVE || modeRequested !== "exclusive";
+
     if (inclusive && combinedRate > 0) {
       netAmount = +(grossAmount / (1 + combinedRate / 100)).toFixed(2);
       taxAmount = +(grossAmount - netAmount).toFixed(2);
     }
 
+    // Customer lookup / create cache
     let map = fs.existsSync(CUSTOMER_MAP_PATH)
       ? JSON.parse(fs.readFileSync(CUSTOMER_MAP_PATH, "utf8"))
       : {};
@@ -502,17 +503,22 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       fs.writeFileSync(CUSTOMER_MAP_PATH, JSON.stringify(map, null, 2));
     }
 
-    const calcMode = inclusive ? "TaxInclusive" : "TaxExcluded";
+    // Force inclusive mode in payload
+    const calcMode = "TaxInclusive";
 
+    // Description with breakdown for audit clarity
     const descParts = [
       `Room: ${room || "-"}`,
       `Check-in: ${checkin || "-"}`,
       `Check-out: ${checkout || "-"}`,
     ];
     if (inclusive && combinedRate > 0) {
-      descParts.push(`(Net ${netAmount.toFixed(2)} + VAT ${taxAmount.toFixed(2)} @ ${combinedRate.toFixed(2)}%)`);
+      descParts.push(
+        `Includes VAT @ ${combinedRate.toFixed(2)}% on EC$${netAmount.toFixed(2)} = EC$${taxAmount.toFixed(2)}`
+      );
     }
 
+    // Build SalesReceipt payload
     const baseReceipt = {
       CustomerRef: { value: customerId },
       TxnDate: date,
@@ -520,13 +526,15 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       GlobalTaxCalculation: calcMode,
       TxnTaxDetail: {
         TxnTaxCodeRef: { value: taxCodeRef.value },
+        // Explicitly provide the embedded tax to prevent QBO from adding tax on top
+        TotalTax: taxAmount,
       },
       Line: [
         {
-          Amount: grossAmount,
+          Amount: grossAmount, // gross total, tax-inclusive
           DetailType: "SalesItemLineDetail",
           Description: descParts.join(" | "),
-            SalesItemLineDetail: {
+          SalesItemLineDetail: {
             ItemRef: itemRef,
             TaxCodeRef: { value: taxCodeRef.value },
           },
@@ -550,7 +558,7 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       const msg = JSON.stringify(detail || err);
       if (payload.DocNumber && /DocNumber|Duplicate|duplicate/i.test(msg)) {
         try {
-          const retryPayload = { ...baseReceipt };
+          const retryPayload = { ...baseReceipt }; // omit DocNumber
           response = await createSalesReceipt(retryPayload);
         } catch (retryErr) {
           log("Retry without DocNumber failed:", retryErr.response?.data || retryErr);
@@ -568,7 +576,7 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       netAmount: netAmount.toFixed(2),
       taxAmount: taxAmount.toFixed(2),
       taxRatePercent: combinedRate.toFixed(4),
-      inclusive: inclusive,
+      inclusive: true,
     });
   } catch (err) {
     log("QuickBooks Error:", err.response?.data || err);
