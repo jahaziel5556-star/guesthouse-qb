@@ -1,4 +1,4 @@
-// index.js - QuickBooks backend (robust tax-inclusive support using TaxInclusiveAmt + net line Amount)
+// index.js - QuickBooks backend (guaranteed tax-inclusive totals: persist net line amount + explicit tax with TaxInclusive)
 const express = require("express");
 const axios = require("axios");
 const fs = require("fs");
@@ -275,7 +275,6 @@ async function resolveTaxCodeRef(tokens, { taxCode, taxAgency } = {}) {
   } else if (RAW_TAX_AGENCY) {
     ref = await resolveByAgency(RAW_TAX_AGENCY);
   } else {
-    // Fallback: any VAT
     const data = await qboQuery(tokens, "select * from TaxCode where Active = true maxresults 500");
     const list = data.QueryResponse.TaxCode || [];
     const hit = list.find(tc => /vat/i.test(tc.Name || ""));
@@ -412,8 +411,7 @@ app.post("/payment-to-quickbooks", async (req, res) => {
     const netAmount = +rawNet.toFixed(2);
     const taxAmount = +(grossAmount - netAmount).toFixed(2);
 
-    // Purposefully round only final net & tax; keep rawNet for debug if needed
-    log("Inclusive calculation:", { grossAmount, combinedRate, netAmount, taxAmount });
+    log("Inclusive calc:", { grossAmount, combinedRate, netAmount, taxAmount, taxCodeId: taxCodeRef.value });
 
     // Customer lookup/create
     let map = fs.existsSync(CUSTOMER_MAP_PATH)
@@ -457,10 +455,11 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       `Includes VAT @ ${combinedRate.toFixed(2)}% on EC$${netAmount.toFixed(2)} = EC$${taxAmount.toFixed(2)}`
     ].join(" | ");
 
-    // IMPORTANT:
-    // - Line.Amount must be the NET for inclusive tax to survive future edits.
-    // - SalesItemLineDetail.TaxInclusiveAmt carries the GROSS.
-    // - GlobalTaxCalculation=TaxInclusive + TxnTaxDetail.TotalTax stops double addition.
+    // STRICT INCLUSIVE FIX:
+    // - Store net in Amount (so future edits don't re-add tax to gross)
+    // - Provide TaxInclusiveAmt with gross
+    // - GlobalTaxCalculation: TaxInclusive
+    // - Provide TotalTax so QBO doesn't add on top
     const baseReceipt = {
       CustomerRef: { value: customerId },
       TxnDate: date,
@@ -472,14 +471,13 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       },
       Line: [
         {
-          Amount: netAmount, // net before tax
+          Amount: netAmount, // NET
           DetailType: "SalesItemLineDetail",
           Description: desc,
           SalesItemLineDetail: {
             ItemRef: itemRef,
             TaxCodeRef: { value: taxCodeRef.value },
-            // This field is not always documented but recognized: inclusive (gross) amount
-            TaxInclusiveAmt: grossAmount,
+            TaxInclusiveAmt: grossAmount, // GROSS
           },
         },
       ],
@@ -519,7 +517,8 @@ app.post("/payment-to-quickbooks", async (req, res) => {
     try {
       const fetchUrl = `${API_BASE}${tokens.realmId}/salesreceipt/${receiptId}`;
       const fetchResp = await axios.get(fetchUrl, { headers });
-      fetched = fetchResp.data;
+      fetched = fetchResp.data?.SalesReceipt || null;
+      log("Fetched stored receipt:", JSON.stringify(fetched || {}, null, 2));
     } catch (e) {
       log("Fetch after create failed (non-fatal):", e.response?.data || e);
     }
@@ -532,8 +531,7 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       taxCalculated: taxAmount.toFixed(2),
       taxRatePercent: combinedRate.toFixed(4),
       mode: "TaxInclusive",
-      echoedRequestLine: baseReceipt.Line[0],
-      storedReceipt: fetched?.SalesReceipt || null,
+      storedReceipt: fetched,
     });
   } catch (err) {
     log("QuickBooks Error:", err.response?.data || err);
