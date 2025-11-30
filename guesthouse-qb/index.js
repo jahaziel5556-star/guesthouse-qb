@@ -443,32 +443,7 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       );
     }
 
-    // Build SalesReceipt with TaxExcluded and net line amount
-    const baseReceipt = {
-      CustomerRef: { value: customerId: undefined }, // will be set below
-      TxnDate: date,
-      PrivateNote: notes || "",
-      GlobalTaxCalculation: "TaxExcluded", // QBO adds tax to net to reach gross
-
-      // Header-level tax code. Do NOT set TotalTax; let QBO compute.
-      TxnTaxDetail: {
-        TxnTaxCodeRef: { value: taxCodeRef.value },
-      },
-
-      Line: [
-        {
-          Amount: netAmount, // net (pre-tax) line amount
-          DetailType: "SalesItemLineDetail",
-          Description: descParts.join(" | "),
-          SalesItemLineDetail: {
-            ItemRef: itemRef,
-            TaxCodeRef: { value: taxCodeRef.value },
-          },
-        },
-      ],
-    };
-
-    // Resolve or create customer, then set in payload
+    // Resolve or create customer
     let map = fs.existsSync(CUSTOMER_MAP_PATH)
       ? JSON.parse(fs.readFileSync(CUSTOMER_MAP_PATH, "utf8"))
       : {};
@@ -503,7 +478,31 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       map[key] = customerId;
       fs.writeFileSync(CUSTOMER_MAP_PATH, JSON.stringify(map, null, 2));
     }
-    baseReceipt.CustomerRef = { value: customerId };
+
+    // Build SalesReceipt with TaxExcluded and net line amount
+    const baseReceipt = {
+      CustomerRef: { value: customerId },
+      TxnDate: date,
+      PrivateNote: notes || "",
+      GlobalTaxCalculation: "TaxExcluded", // QBO adds tax to net to reach gross
+
+      // Header-level tax code. Do NOT set TotalTax; let QBO compute.
+      TxnTaxDetail: {
+        TxnTaxCodeRef: { value: taxCodeRef.value },
+      },
+
+      Line: [
+        {
+          Amount: netAmount, // net (pre-tax) line amount
+          DetailType: "SalesItemLineDetail",
+          Description: descParts.join(" | "),
+          SalesItemLineDetail: {
+            ItemRef: itemRef,
+            TaxCodeRef: { value: taxCodeRef.value },
+          },
+        },
+      ],
+    };
 
     let payload = { ...baseReceipt };
     if (receiptNumber) payload.DocNumber = String(receiptNumber);
