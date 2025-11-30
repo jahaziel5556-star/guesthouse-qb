@@ -1,4 +1,4 @@
-// index.js - QuickBooks backend (TaxCode by Name or Agency, helper endpoints)
+// index.js - QuickBooks backend (accept taxCode/taxAgency in request, robust agency match, VAT fallback)
 const express = require("express");
 const axios = require("axios");
 const fs = require("fs");
@@ -37,8 +37,8 @@ const ALLOW_ITEM_CREATE =
   (process.env.ALLOW_ITEM_CREATE || "true").toLowerCase() === "true";
 
 // Tax configuration
-const RAW_TAX_CODE = (process.env.QB_TAX_CODE || "").trim(); // TaxCode Name or Id (preferred)
-const RAW_TAX_AGENCY = (process.env.QB_TAX_AGENCY || "").trim(); // Fallback: resolve code via agency name
+const RAW_TAX_CODE = (process.env.QB_TAX_CODE || "").trim(); // preferred
+const RAW_TAX_AGENCY = (process.env.QB_TAX_AGENCY || "").trim(); // optional
 
 // -------------------- CORS --------------------
 const ALLOWED_ORIGINS = (
@@ -108,10 +108,7 @@ function buildAuthUrl() {
 async function qboQuery(tokens, q) {
   const url = `${API_BASE}${tokens.realmId}/query?query=${encodeURIComponent(q)}`;
   const resp = await axios.get(url, {
-    headers: {
-      Authorization: `Bearer ${tokens.access_token}`,
-      Accept: "application/json",
-    },
+    headers: { Authorization: `Bearer ${tokens.access_token}`, Accept: "application/json" },
   });
   return resp.data;
 }
@@ -133,10 +130,7 @@ async function getAccessToken() {
     const resp = await axios.post(TOKEN_URL, params.toString(), {
       headers: {
         Authorization:
-          "Basic " +
-          Buffer.from(
-            `${process.env.CLIENT_ID}:${process.env.CLIENT_SECRET}`
-          ).toString("base64"),
+          "Basic " + Buffer.from(`${process.env.CLIENT_ID}:${process.env.CLIENT_SECRET}`).toString("base64"),
         "Content-Type": "application/x-www-form-urlencoded",
       },
     });
@@ -154,10 +148,8 @@ async function getAccessToken() {
   } catch (err) {
     log("Token refresh failed:", err.response?.data || err);
     if (JSON.stringify(err).includes("invalid_grant")) {
-      try {
-        fs.unlinkSync(TOKEN_PATH);
-        log("tokens.json deleted due to invalid_grant");
-      } catch {}
+      try { fs.unlinkSync(TOKEN_PATH); } catch {}
+      log("tokens.json deleted due to invalid_grant");
     }
     throw new Error("Token refresh failed.");
   }
@@ -165,18 +157,12 @@ async function getAccessToken() {
 
 // -------------------- ITEM HELPERS --------------------
 async function findItemByName(tokens, name) {
-  const data = await qboQuery(
-    tokens,
-    `select * from Item where Name='${name.replace(/'/g, "\\'")}'`
-  );
+  const data = await qboQuery(tokens, `select * from Item where Name='${name.replace(/'/g, "\\'")}'`);
   return data.QueryResponse.Item?.[0] || null;
 }
 
 async function findAnyIncomeAccount(tokens) {
-  const data = await qboQuery(
-    tokens,
-    "select * from Account where AccountType='Income' maxresults 50"
-  );
+  const data = await qboQuery(tokens, "select * from Account where AccountType='Income' maxresults 50");
   return (data.QueryResponse.Account || [])[0] || null;
 }
 
@@ -184,20 +170,15 @@ async function ensureItemRef(tokens) {
   if (process.env.ITEM_REF_ID) {
     return { value: String(process.env.ITEM_REF_ID), name: DEFAULT_ITEM_NAME };
   }
-
   let item = await findItemByName(tokens, DEFAULT_ITEM_NAME);
   if (item) return { value: item.Id, name: item.Name };
 
   if (!ALLOW_ITEM_CREATE) {
-    throw new Error(
-      `Item '${DEFAULT_ITEM_NAME}' not found and ALLOW_ITEM_CREATE=false`
-    );
+    throw new Error(`Item '${DEFAULT_ITEM_NAME}' not found and ALLOW_ITEM_CREATE=false`);
   }
 
   const incomeAccount = await findAnyIncomeAccount(tokens);
-  if (!incomeAccount) {
-    throw new Error("No Income account found to attach new Item.");
-  }
+  if (!incomeAccount) throw new Error("No Income account found to attach new Item.");
 
   const resp = await axios.post(
     `${API_BASE}${tokens.realmId}/item`,
@@ -220,96 +201,104 @@ async function ensureItemRef(tokens) {
 }
 
 // -------------------- TAX CODE RESOLUTION --------------------
-// Simple in-memory cache to reduce repeated lookups during runtime
-const taxCache = {
-  byNameOrId: new Map(), // key: RAW_TAX_CODE value -> { value: TaxCodeId }
-  byAgency: new Map(), // key: RAW_TAX_AGENCY value -> { value: TaxCodeId }
-};
+const taxCache = { byNameOrId: new Map(), byAgency: new Map(), vatFallback: null };
 
-async function resolveTaxCodeByCode(tokens) {
-  if (!RAW_TAX_CODE) return null;
-  if (taxCache.byNameOrId.has(RAW_TAX_CODE)) return taxCache.byNameOrId.get(RAW_TAX_CODE);
+function cleanAgencyName(s) {
+  return String(s || "")
+    .toLowerCase()
+    .replace(/@.*$/g, "")      // drop any trailing "@10%" etc
+    .replace(/[^a-z0-9]+/g, " ") // strip punctuation to spaces
+    .trim();
+}
 
-  // If looks like id (numbers or uuid), accept as-is
-  if (/^[0-9a-fA-F-]+$/.test(RAW_TAX_CODE)) {
-    const ref = { value: RAW_TAX_CODE };
-    taxCache.byNameOrId.set(RAW_TAX_CODE, ref);
+async function resolveTaxCodeByCode(tokens, codeOrName) {
+  const key = (codeOrName || "").trim();
+  if (!key) return null;
+  if (taxCache.byNameOrId.has(key)) return taxCache.byNameOrId.get(key);
+
+  if (/^[0-9a-fA-F-]+$/.test(key)) {
+    const ref = { value: key };
+    taxCache.byNameOrId.set(key, ref);
     return ref;
   }
 
-  // Else treat as Name
-  const safeName = RAW_TAX_CODE.replace(/'/g, "\\'");
+  const safeName = key.replace(/'/g, "\\'");
   const data = await qboQuery(tokens, `select * from TaxCode where Name='${safeName}'`);
   const tc = data.QueryResponse.TaxCode?.[0];
-  if (!tc) {
-    throw new Error(`TaxCode '${RAW_TAX_CODE}' not found. Set QB_TAX_CODE to an existing Id or exact Name.`);
-  }
+  if (!tc) throw new Error(`TaxCode '${key}' not found.`);
   const ref = { value: tc.Id };
-  taxCache.byNameOrId.set(RAW_TAX_CODE, ref);
+  taxCache.byNameOrId.set(key, ref);
   return ref;
 }
 
-async function resolveTaxCodeByAgency(tokens) {
-  if (!RAW_TAX_AGENCY) return null;
-  if (taxCache.byAgency.has(RAW_TAX_AGENCY)) return taxCache.byAgency.get(RAW_TAX_AGENCY);
+async function resolveTaxCodeByAgency(tokens, agencyName) {
+  const raw = (agencyName || RAW_TAX_AGENCY || "").trim();
+  if (!raw) return null;
+  if (taxCache.byAgency.has(raw)) return taxCache.byAgency.get(raw);
 
-  // 1) Get active TaxCodes (limit to a reasonable number)
+  const wanted = cleanAgencyName(raw);
+
+  // Load active codes
   const codesData = await qboQuery(tokens, "select * from TaxCode where Active = true maxresults 500");
   const codes = codesData.QueryResponse.TaxCode || [];
 
-  // Collect all TaxRateRef Ids referenced by these codes
+  // Collect all TaxRate ids referenced
   const rateIds = new Set();
   for (const code of codes) {
-    const details = code.TaxRateList?.TaxRateDetail || [];
-    details.forEach(d => {
+    (code.TaxRateList?.TaxRateDetail || []).forEach(d => {
       const id = d?.TaxRateRef?.value;
       if (id) rateIds.add(id);
     });
   }
-  if (rateIds.size === 0) throw new Error(`No TaxRates referenced by active TaxCodes.`);
-
-  // 2) Build a map rateId -> agencyName
+  // Map rate id -> agency name (cleaned)
   const rateIdToAgency = new Map();
-  for (const rateId of rateIds) {
-    const rateData = await qboQuery(tokens, `select * from TaxRate where Id = '${rateId}'`);
+  for (const rid of rateIds) {
+    const rateData = await qboQuery(tokens, `select * from TaxRate where Id = '${rid}'`);
     const rate = rateData.QueryResponse.TaxRate?.[0];
-    // AgencyRef may be nested; protect with optional chaining
-    const agencyName = rate?.AgencyRef?.name || rate?.AgencyRef?.Name || null;
-    if (agencyName) {
-      rateIdToAgency.set(rateId, agencyName);
-    }
+    const agency = rate?.AgencyRef?.name || rate?.AgencyRef?.Name || null;
+    if (agency) rateIdToAgency.set(rid, cleanAgencyName(agency));
   }
 
-  // 3) Find a TaxCode that uses a rate with the desired agency name
-  const wanted = RAW_TAX_AGENCY.toLowerCase();
+  // Find any code that references a rate under the wanted agency (allow partial includes both ways)
   for (const code of codes) {
     const details = code.TaxRateList?.TaxRateDetail || [];
     const match = details.some(d => {
       const rid = d?.TaxRateRef?.value;
       const agency = rid ? rateIdToAgency.get(rid) : null;
-      return agency && agency.toLowerCase() === wanted;
+      return agency && (agency.includes(wanted) || wanted.includes(agency));
     });
     if (match) {
       const ref = { value: code.Id };
-      taxCache.byAgency.set(RAW_TAX_AGENCY, ref);
+      taxCache.byAgency.set(raw, ref);
       return ref;
     }
   }
 
-  throw new Error(`No TaxCode found for Tax Agency '${RAW_TAX_AGENCY}'. Set QB_TAX_CODE to a known TaxCode Name/Id or verify the agency name.`);
+  throw new Error(`No TaxCode found for Tax Agency '${raw}'.`);
 }
 
-async function resolveTaxCodeRef(tokens) {
-  // Prefer explicit TaxCode (Name or Id)
-  if (RAW_TAX_CODE) {
-    return await resolveTaxCodeByCode(tokens);
-  }
-  // Else resolve by agency name if provided
-  if (RAW_TAX_AGENCY) {
-    return await resolveTaxCodeByAgency(tokens);
-  }
-  // Nothing provided => fail with message
-  throw new Error("No tax configured. Set QB_TAX_CODE to TaxCode Name/Id or QB_TAX_AGENCY to an Agency Name.");
+async function resolveAnyVATCode(tokens) {
+  if (taxCache.vatFallback) return taxCache.vatFallback;
+  const data = await qboQuery(tokens, "select Id, Name, Active from TaxCode where Active = true maxresults 500");
+  const list = data.QueryResponse.TaxCode || [];
+  const hit = list.find(tc => /vat/i.test(tc.Name || ""));
+  if (!hit) throw new Error("No VAT TaxCode found in company.");
+  taxCache.vatFallback = { value: hit.Id };
+  return taxCache.vatFallback;
+}
+
+// Decide TaxCodeRef based on request or env, with VAT fallback
+async function resolveTaxCodeRef(tokens, { taxCode, taxAgency } = {}) {
+  // 1) Request body overrides
+  if (taxCode) return await resolveTaxCodeByCode(tokens, taxCode);
+  if (taxAgency) return await resolveTaxCodeByAgency(tokens, taxAgency);
+
+  // 2) Environment fallback
+  if (RAW_TAX_CODE) return await resolveTaxCodeByCode(tokens, RAW_TAX_CODE);
+  if (RAW_TAX_AGENCY) return await resolveTaxCodeByAgency(tokens, RAW_TAX_AGENCY);
+
+  // 3) Last resort: pick any VAT TaxCode
+  return await resolveAnyVATCode(tokens);
 }
 
 // -------------------- CUSTOMER --------------------
@@ -321,8 +310,7 @@ async function findCustomerByName(displayName, tokens) {
   return data.QueryResponse.Customer?.[0] || null;
 }
 
-// -------------------- HELPER ENDPOINTS (discovery) --------------------
-// List TaxCodes (Id, Name)
+// -------------------- HELPER ENDPOINTS --------------------
 app.get("/tax-codes", async (_req, res) => {
   try {
     const tokens = await getAccessToken();
@@ -334,7 +322,6 @@ app.get("/tax-codes", async (_req, res) => {
   }
 });
 
-// List TaxRates with their AgencyRef names
 app.get("/tax-rates", async (_req, res) => {
   try {
     const tokens = await getAccessToken();
@@ -393,10 +380,7 @@ app.get("/callback", async (req, res) => {
     const resp = await axios.post(TOKEN_URL, params.toString(), {
       headers: {
         Authorization:
-          "Basic " +
-          Buffer.from(
-            `${process.env.CLIENT_ID}:${process.env.CLIENT_SECRET}`
-          ).toString("base64"),
+          "Basic " + Buffer.from(`${process.env.CLIENT_ID}:${process.env.CLIENT_SECRET}`).toString("base64"),
         "Content-Type": "application/x-www-form-urlencoded",
       },
     });
@@ -412,9 +396,7 @@ app.get("/callback", async (req, res) => {
     log("QuickBooks Authorized.");
     res.send("✅ QuickBooks authorized successfully. You may close this tab.");
   } catch (err) {
-    res
-      .status(500)
-      .send(`❌ Error: ${JSON.stringify(err.response?.data || err)}`);
+    res.status(500).send(`❌ Error: ${JSON.stringify(err.response?.data || err)}`);
   }
 });
 
@@ -442,6 +424,9 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       checkin,
       checkout,
       notes,
+      // NEW: allow overrides from frontend if env not set
+      taxCode,
+      taxAgency,
     } = req.body;
 
     if (!name || !email || !amount || !date) {
@@ -450,7 +435,7 @@ app.post("/payment-to-quickbooks", async (req, res) => {
 
     const tokens = await getAccessToken();
     const itemRef = await ensureItemRef(tokens);
-    const taxCodeRef = await resolveTaxCodeRef(tokens);
+    const taxCodeRef = await resolveTaxCodeRef(tokens, { taxCode, taxAgency });
 
     // Customer lookup / create (cached by name+email)
     let map = fs.existsSync(CUSTOMER_MAP_PATH)
