@@ -8,7 +8,7 @@ const dotenv = require("dotenv");
 
 dotenv.config();
 
-const app = express(A);
+const app = express(); // FIX: removed (A)
 app.use(express.json());
 
 // -------------------- CONFIG --------------------
@@ -225,7 +225,7 @@ const taxCache = { byNameOrId: new Map(), byAgency: new Map(), vatFallback: null
 function cleanAgencyName(s) {
   return String(s || "")
     .toLowerCase()
-    .replace(/@.*$/g, "") // drop suffix like "@10%"
+    .replace(/@.*$/g, "")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
 }
@@ -310,7 +310,6 @@ async function resolveTaxCodeRef(tokens, { taxCode, taxAgency } = {}) {
   return await resolveAnyVATCode(tokens);
 }
 
-// Extract combined percentage from TaxCode (_full) object
 function extractCombinedRate(taxCodeFull) {
   if (!taxCodeFull?.TaxRateList?.TaxRateDetail) return 0;
   return taxCodeFull.TaxRateList.TaxRateDetail.reduce((sum, d) => {
@@ -442,7 +441,7 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       notes,
       taxCode,
       taxAgency,
-      taxCalc, // optional override
+      taxCalc,
     } = req.body;
 
     if (!name || !email || !amount || !date) {
@@ -457,10 +456,9 @@ app.post("/payment-to-quickbooks", async (req, res) => {
     const tokens = await getAccessToken();
     const itemRef = await ensureItemRef(tokens);
     const taxCodeRef = await resolveTaxCodeRef(tokens, { taxCode, taxAgency });
-    const taxCodeFull = taxCodeRef._full; // may contain detailed rate info
-    const combinedRate = extractCombinedRate(taxCodeFull); // percent
+    const taxCodeFull = taxCodeRef._full;
+    const combinedRate = extractCombinedRate(taxCodeFull);
 
-    // Compute net & tax if inclusive
     let netAmount = grossAmount;
     let taxAmount = 0;
     const modeRequested = (taxCalc || TAX_CALC).toLowerCase();
@@ -470,7 +468,6 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       taxAmount = +(grossAmount - netAmount).toFixed(2);
     }
 
-    // Customer lookup
     let map = fs.existsSync(CUSTOMER_MAP_PATH)
       ? JSON.parse(fs.readFileSync(CUSTOMER_MAP_PATH, "utf8"))
       : {};
@@ -507,7 +504,6 @@ app.post("/payment-to-quickbooks", async (req, res) => {
 
     const calcMode = inclusive ? "TaxInclusive" : "TaxExcluded";
 
-    // Description enriched with net/tax breakdown if inclusive
     const descParts = [
       `Room: ${room || "-"}`,
       `Check-in: ${checkin || "-"}`,
@@ -524,14 +520,13 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       GlobalTaxCalculation: calcMode,
       TxnTaxDetail: {
         TxnTaxCodeRef: { value: taxCodeRef.value },
-        // TotalTax optional; let QBO compute
       },
       Line: [
         {
-          Amount: grossAmount, // gross when inclusive
+          Amount: grossAmount,
           DetailType: "SalesItemLineDetail",
           Description: descParts.join(" | "),
-          SalesItemLineDetail: {
+            SalesItemLineDetail: {
             ItemRef: itemRef,
             TaxCodeRef: { value: taxCodeRef.value },
           },
@@ -555,7 +550,7 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       const msg = JSON.stringify(detail || err);
       if (payload.DocNumber && /DocNumber|Duplicate|duplicate/i.test(msg)) {
         try {
-          const retryPayload = { ...baseReceipt }; // omit DocNumber
+          const retryPayload = { ...baseReceipt };
           response = await createSalesReceipt(retryPayload);
         } catch (retryErr) {
           log("Retry without DocNumber failed:", retryErr.response?.data || retryErr);
