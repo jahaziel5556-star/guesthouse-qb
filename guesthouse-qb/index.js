@@ -1,4 +1,4 @@
-// index.js - QuickBooks backend (guaranteed tax-inclusive totals: persist net line amount + explicit tax with TaxInclusive)
+// index.js - QuickBooks backend (tax-inclusive guaranteed by computing rate from TaxRate and sending net line amount)
 const express = require("express");
 const axios = require("axios");
 const fs = require("fs");
@@ -208,6 +208,27 @@ async function fetchTaxCodeById(tokens, id) {
   return data.QueryResponse.TaxCode?.[0] || null;
 }
 
+// Get combined percentage by reading TaxRate details referenced by TaxCode
+async function getCombinedRateFromTaxCode(tokens, taxCodeObj) {
+  const details = taxCodeObj?.TaxRateList?.TaxRateDetail || [];
+  if (!details.length) return 0;
+  const ids = [];
+  for (const d of details) {
+    const rid = d?.TaxRateRef?.value;
+    if (rid) ids.push(rid);
+  }
+  if (!ids.length) return 0;
+
+  let total = 0;
+  for (const id of ids) {
+    const rateData = await qboQuery(tokens, `select * from TaxRate where Id='${id}'`);
+    const rate = rateData.QueryResponse.TaxRate?.[0];
+    const val = parseFloat(rate?.RateValue ?? 0);
+    if (!isNaN(val)) total += val;
+  }
+  return total;
+}
+
 async function resolveTaxCodeRef(tokens, { taxCode, taxAgency } = {}) {
   let ref = null;
 
@@ -216,6 +237,7 @@ async function resolveTaxCodeRef(tokens, { taxCode, taxAgency } = {}) {
     const wanted = raw.toLowerCase().replace(/@.*$/g, "").replace(/[^a-z0-9]+/g, " ").trim();
     const codesData = await qboQuery(tokens, "select * from TaxCode where Active = true maxresults 500");
     const codes = codesData.QueryResponse.TaxCode || [];
+
     const rateIds = new Set();
     for (const code of codes) {
       (code.TaxRateList?.TaxRateDetail || []).forEach(d => {
@@ -231,6 +253,8 @@ async function resolveTaxCodeRef(tokens, { taxCode, taxAgency } = {}) {
         .toLowerCase().replace(/@.*$/g, "").replace(/[^a-z0-9]+/g, " ").trim();
       if (agency) rateIdToAgency.set(rid, agency);
     }
+
+    let matchCode = null;
     for (const code of codes) {
       const details = code.TaxRateList?.TaxRateDetail || [];
       const match = details.some(d => {
@@ -238,12 +262,11 @@ async function resolveTaxCodeRef(tokens, { taxCode, taxAgency } = {}) {
         const agency = rid ? rateIdToAgency.get(rid) : null;
         return agency && (agency.includes(wanted) || wanted.includes(agency));
       });
-      if (match) {
-        const tcFull = await fetchTaxCodeById(tokens, code.Id);
-        return { value: code.Id, _full: tcFull || code };
-      }
+      if (match) { matchCode = code; break; }
     }
-    throw new Error(`No TaxCode found for Tax Agency '${agencyRaw}'`);
+    if (!matchCode) throw new Error(`No TaxCode found for Tax Agency '${agencyRaw}'`);
+    const tcFull = await fetchTaxCodeById(tokens, matchCode.Id);
+    return { value: matchCode.Id, _full: tcFull || matchCode };
   };
 
   if (taxCode) {
@@ -275,6 +298,7 @@ async function resolveTaxCodeRef(tokens, { taxCode, taxAgency } = {}) {
   } else if (RAW_TAX_AGENCY) {
     ref = await resolveByAgency(RAW_TAX_AGENCY);
   } else {
+    // Fallback: any VAT
     const data = await qboQuery(tokens, "select * from TaxCode where Active = true maxresults 500");
     const list = data.QueryResponse.TaxCode || [];
     const hit = list.find(tc => /vat/i.test(tc.Name || ""));
@@ -286,17 +310,12 @@ async function resolveTaxCodeRef(tokens, { taxCode, taxAgency } = {}) {
   return ref;
 }
 
-function extractCombinedRate(taxCodeFull) {
-  if (!taxCodeFull?.TaxRateList?.TaxRateDetail) return 0;
-  return taxCodeFull.TaxRateList.TaxRateDetail.reduce((sum, d) => {
-    const rate = parseFloat(d.RateValue ?? 0);
-    return sum + (isNaN(rate) ? 0 : rate);
-  }, 0);
-}
-
 // -------------------- CUSTOMER --------------------
 async function findCustomerByName(displayName, tokens) {
-  const data = await qboQuery(tokens, `select * from Customer where DisplayName='${displayName.replace(/'/g, "\\'")}'`);
+  const data = await qboQuery(
+    tokens,
+    `select * from Customer where DisplayName='${displayName.replace(/'/g, "\\'")}'`
+  );
   return data.QueryResponse.Customer?.[0] || null;
 }
 
@@ -403,15 +422,29 @@ app.post("/payment-to-quickbooks", async (req, res) => {
     const tokens = await getAccessToken();
     const itemRef = await ensureItemRef(tokens);
     const taxCodeRef = await resolveTaxCodeRef(tokens, { taxCode, taxAgency });
-    const taxCodeFull = taxCodeRef._full;
-    const combinedRate = extractCombinedRate(taxCodeFull); // e.g. 10
+
+    // Compute accurate combined rate from TaxRate table
+    const combinedRate = await getCombinedRateFromTaxCode(tokens, taxCodeRef._full);
+    if (!combinedRate || combinedRate <= 0) {
+      throw new Error(
+        `Resolved TaxCode '${taxCodeRef._full?.Name || taxCodeRef.value}' has 0% rate. ` +
+        `Cannot compute inclusive totals. Please verify your TaxCode setup in QuickBooks.`
+      );
+    }
 
     // Compute net & tax from gross inclusive
-    const rawNet = combinedRate > 0 ? (grossAmount / (1 + combinedRate / 100)) : grossAmount;
+    const rawNet = grossAmount / (1 + combinedRate / 100);
     const netAmount = +rawNet.toFixed(2);
     const taxAmount = +(grossAmount - netAmount).toFixed(2);
 
-    log("Inclusive calc:", { grossAmount, combinedRate, netAmount, taxAmount, taxCodeId: taxCodeRef.value });
+    log("Inclusive calc:", {
+      grossAmount,
+      combinedRate,
+      netAmount,
+      taxAmount,
+      taxCodeId: taxCodeRef.value,
+      taxCodeName: taxCodeRef._full?.Name || null,
+    });
 
     // Customer lookup/create
     let map = fs.existsSync(CUSTOMER_MAP_PATH)
@@ -455,11 +488,11 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       `Includes VAT @ ${combinedRate.toFixed(2)}% on EC$${netAmount.toFixed(2)} = EC$${taxAmount.toFixed(2)}`
     ].join(" | ");
 
-    // STRICT INCLUSIVE FIX:
-    // - Store net in Amount (so future edits don't re-add tax to gross)
-    // - Provide TaxInclusiveAmt with gross
+    // STRICT INCLUSIVE:
+    // - Set Amount to NET so edits won't re-add tax to gross
     // - GlobalTaxCalculation: TaxInclusive
-    // - Provide TotalTax so QBO doesn't add on top
+    // - Provide TotalTax to avoid double-add
+    // - Optionally include TaxInclusiveAmt=GROSS (helps UI in some tenants)
     const baseReceipt = {
       CustomerRef: { value: customerId },
       TxnDate: date,
@@ -471,13 +504,13 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       },
       Line: [
         {
-          Amount: netAmount, // NET
+          Amount: netAmount, // NET amount
           DetailType: "SalesItemLineDetail",
           Description: desc,
           SalesItemLineDetail: {
             ItemRef: itemRef,
             TaxCodeRef: { value: taxCodeRef.value },
-            TaxInclusiveAmt: grossAmount, // GROSS
+            TaxInclusiveAmt: grossAmount, // GROSS (for UI consistency)
           },
         },
       ],
@@ -512,7 +545,7 @@ app.post("/payment-to-quickbooks", async (req, res) => {
 
     const receiptId = createResp.data.SalesReceipt.Id;
 
-    // Fetch stored receipt to confirm QBO interpretation
+    // Fetch stored receipt to confirm
     let fetched = null;
     try {
       const fetchUrl = `${API_BASE}${tokens.realmId}/salesreceipt/${receiptId}`;
