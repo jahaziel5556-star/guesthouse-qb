@@ -1,4 +1,4 @@
-// index.js - QuickBooks backend with payment method in description
+// index.js - QuickBooks backend (guaranteed tax-inclusive totals:  persist net line amount + explicit tax with TaxInclusive)
 const express = require("express");
 const axios = require("axios");
 const fs = require("fs");
@@ -21,7 +21,7 @@ const API_BASE =
     : "https://sandbox-quickbooks.api.intuit. com/v3/company/";
 
 const SCOPES = [
-  "com. intuit.quickbooks.accounting",
+  "com.intuit.quickbooks.accounting",
   "openid",
   "profile",
   "email",
@@ -38,8 +38,6 @@ const ALLOW_ITEM_CREATE =
 
 const RAW_TAX_CODE = (process.env.QB_TAX_CODE || "").trim();
 const RAW_TAX_AGENCY = (process.env.QB_TAX_AGENCY || "").trim();
-const PREV_QB_TAX_CODE = (process.env. PREV_QB_TAX_CODE || "").trim();
-const FALLBACK_TAX_PERCENT = parseFloat(process.env. FALLBACK_TAX_PERCENT || "10");
 
 // -------------------- CORS --------------------
 const ALLOWED_ORIGINS = (
@@ -63,7 +61,7 @@ app.use(
 
 app.options("*", (req, res) => {
   const origin = req.headers.origin;
-  if (origin && ALLOWED_ORIGINS. includes(origin)) {
+  if (origin && ALLOWED_ORIGINS.includes(origin)) {
     res.header("Access-Control-Allow-Origin", origin);
     res.header("Access-Control-Allow-Credentials", "true");
     res.header(
@@ -116,7 +114,7 @@ async function qboQuery(tokens, q) {
 
 // -------------------- TOKEN MANAGEMENT --------------------
 async function getAccessToken() {
-  if (! fs.existsSync(TOKEN_PATH))
+  if (!fs.existsSync(TOKEN_PATH))
     throw new Error("Not authenticated with QuickBooks.");
 
   const tokens = JSON.parse(fs.readFileSync(TOKEN_PATH, "utf8"));
@@ -133,15 +131,15 @@ async function getAccessToken() {
         Authorization: 
           "Basic " +
           Buffer.from(
-            `${process.env.CLIENT_ID}:${process.env.CLIENT_SECRET}`
+            `${process.env.CLIENT_ID}:${process.env. CLIENT_SECRET}`
           ).toString("base64"),
         "Content-Type": "application/x-www-form-urlencoded",
       },
     });
 
     const updated = {
-      access_token: resp. data.access_token,
-      refresh_token: resp.data. refresh_token || tokens.refresh_token,
+      access_token:  resp.data.access_token,
+      refresh_token: resp. data.refresh_token || tokens.refresh_token,
       expires_at: Date.now() + resp.data.expires_in * 1000,
       realmId: tokens.realmId,
     };
@@ -175,7 +173,7 @@ async function ensureItemRef(tokens) {
     return { value: String(process.env.ITEM_REF_ID), name: DEFAULT_ITEM_NAME };
   }
   let item = await findItemByName(tokens, DEFAULT_ITEM_NAME);
-  if (item) return { value: item. Id, name: item.Name };
+  if (item) return { value: item.Id, name: item.Name };
 
   if (! ALLOW_ITEM_CREATE) {
     throw new Error(`Item '${DEFAULT_ITEM_NAME}' not found and ALLOW_ITEM_CREATE=false`);
@@ -210,35 +208,12 @@ async function fetchTaxCodeById(tokens, id) {
   return data.QueryResponse.TaxCode?.[0] || null;
 }
 
-async function getCombinedRateFromTaxCode(tokens, taxCodeObj) {
-  const details = taxCodeObj?. TaxRateList?. TaxRateDetail || [];
-  if (!details.length) return 0;
-  let total = 0;
-  for (const d of details) {
-    const rid = d?. TaxRateRef?.value;
-    if (! rid) continue;
-    const rateData = await qboQuery(tokens, `select * from TaxRate where Id='${rid}'`);
-    const rate = rateData.QueryResponse.TaxRate?.[0];
-    const val = parseFloat(rate?.RateValue ??  0);
-    if (! isNaN(val)) total += val;
-  }
-  return total;
-}
-
 async function resolveTaxCodeRef(tokens, { taxCode, taxAgency } = {}) {
   let ref = null;
 
-  const resolveByName = async (name) => {
-    const safe = name.replace(/'/g, "\\'");
-    const data = await qboQuery(tokens, `select * from TaxCode where Name='${safe}'`);
-    const tc = data.QueryResponse.TaxCode?.[0];
-    if (! tc) throw new Error(`TaxCode '${name}' not found. `);
-    return { value: tc.Id, _full: tc };
-  };
-
   const resolveByAgency = async (agencyRaw) => {
-    const clean = (s) => String(s || "").toLowerCase().replace(/@.*$/g, "").replace(/[^a-z0-9]+/g, " ").trim();
-    const wanted = clean(agencyRaw);
+    const raw = agencyRaw.trim();
+    const wanted = raw.toLowerCase().replace(/@.*$/g, "").replace(/[^a-z0-9]+/g, " ").trim();
     const codesData = await qboQuery(tokens, "select * from TaxCode where Active = true maxresults 500");
     const codes = codesData.QueryResponse.TaxCode || [];
     const rateIds = new Set();
@@ -252,13 +227,14 @@ async function resolveTaxCodeRef(tokens, { taxCode, taxAgency } = {}) {
     for (const rid of rateIds) {
       const rateData = await qboQuery(tokens, `select * from TaxRate where Id='${rid}'`);
       const rate = rateData.QueryResponse.TaxRate?.[0];
-      const agency = clean(rate?.AgencyRef?.name || rate?.AgencyRef?.Name || "");
+      const agency = (rate?.AgencyRef?.name || rate?.AgencyRef?.Name || "")
+        .toLowerCase().replace(/@.*$/g, "").replace(/[^a-z0-9]+/g, " ").trim();
       if (agency) rateIdToAgency.set(rid, agency);
     }
     for (const code of codes) {
       const details = code.TaxRateList?.TaxRateDetail || [];
       const match = details.some(d => {
-        const rid = d?.TaxRateRef?.value;
+        const rid = d?. TaxRateRef?.value;
         const agency = rid ? rateIdToAgency. get(rid) : null;
         return agency && (agency.includes(wanted) || wanted.includes(agency));
       });
@@ -273,10 +249,14 @@ async function resolveTaxCodeRef(tokens, { taxCode, taxAgency } = {}) {
   if (taxCode) {
     if (/^[0-9a-fA-F-]+$/.test(taxCode)) {
       const tc = await fetchTaxCodeById(tokens, taxCode);
-      if (! tc) throw new Error(`TaxCode Id '${taxCode}' not found.`);
+      if (! tc) throw new Error(`TaxCode Id '${taxCode}' not found. `);
       ref = { value: tc.Id, _full: tc };
     } else {
-      ref = await resolveByName(taxCode);
+      const safeName = taxCode.replace(/'/g, "\\'");
+      const data = await qboQuery(tokens, `select * from TaxCode where Name='${safeName}'`);
+      const tc = data.QueryResponse.TaxCode?.[0];
+      if (!tc) throw new Error(`TaxCode '${taxCode}' not found.`);
+      ref = { value: tc.Id, _full: tc };
     }
   } else if (taxAgency) {
     ref = await resolveByAgency(taxAgency);
@@ -286,7 +266,11 @@ async function resolveTaxCodeRef(tokens, { taxCode, taxAgency } = {}) {
       if (!tc) throw new Error(`TaxCode Id '${RAW_TAX_CODE}' not found.`);
       ref = { value: tc.Id, _full: tc };
     } else {
-      ref = await resolveByName(RAW_TAX_CODE);
+      const safeName = RAW_TAX_CODE.replace(/'/g, "\\'");
+      const data = await qboQuery(tokens, `select * from TaxCode where Name='${safeName}'`);
+      const tc = data.QueryResponse.TaxCode?.[0];
+      if (!tc) throw new Error(`TaxCode '${RAW_TAX_CODE}' not found.`);
+      ref = { value: tc.Id, _full: tc };
     }
   } else if (RAW_TAX_AGENCY) {
     ref = await resolveByAgency(RAW_TAX_AGENCY);
@@ -302,31 +286,17 @@ async function resolveTaxCodeRef(tokens, { taxCode, taxAgency } = {}) {
   return ref;
 }
 
-async function resolveTaxContext(tokens, { taxCode, taxAgency, previousTaxCode }) {
-  let primary = await resolveTaxCodeRef(tokens, { taxCode, taxAgency });
-  let rate = await getCombinedRateFromTaxCode(tokens, primary._full);
-
-  if ((! rate || rate <= 0) && (previousTaxCode || PREV_QB_TAX_CODE)) {
-    const prevRef = await resolveTaxCodeRef(tokens, { taxCode: previousTaxCode || PREV_QB_TAX_CODE });
-    const prevRate = await getCombinedRateFromTaxCode(tokens, prevRef._full);
-    if (prevRate && prevRate > 0) {
-      return { taxCodeRef: prevRef, ratePercent: prevRate, source: "previousTaxCode" };
-    }
-  }
-
-  if (! rate || rate <= 0) {
-    return { taxCodeRef: primary, ratePercent:  FALLBACK_TAX_PERCENT, source: "fallbackPercent" };
-  }
-
-  return { taxCodeRef: primary, ratePercent: rate, source: "resolved" };
+function extractCombinedRate(taxCodeFull) {
+  if (!taxCodeFull?. TaxRateList?.TaxRateDetail) return 0;
+  return taxCodeFull.TaxRateList.TaxRateDetail.reduce((sum, d) => {
+    const rate = parseFloat(d.RateValue ??  0);
+    return sum + (isNaN(rate) ? 0 : rate);
+  }, 0);
 }
 
 // -------------------- CUSTOMER --------------------
 async function findCustomerByName(displayName, tokens) {
-  const data = await qboQuery(
-    tokens,
-    `select * from Customer where DisplayName='${displayName.replace(/'/g, "\\'")}'`
-  );
+  const data = await qboQuery(tokens, `select * from Customer where DisplayName='${displayName.replace(/'/g, "\\'")}'`);
   return data.QueryResponse.Customer?.[0] || null;
 }
 
@@ -340,8 +310,6 @@ app.get("/health", (_req, res) => {
     allowItemCreate: ALLOW_ITEM_CREATE,
     taxCodeProvided: RAW_TAX_CODE || null,
     taxAgencyProvided: RAW_TAX_AGENCY || null,
-    previousTaxCode: PREV_QB_TAX_CODE || null,
-    fallbackTaxPercent: FALLBACK_TAX_PERCENT,
   });
 });
 
@@ -351,7 +319,7 @@ app.get("/auth", (_req, res) => {
     res.send(`
       <h2>QuickBooks Authorization (${ENV})</h2>
       <a href="${url}" target="_blank" rel="noopener">Authorize QuickBooks</a>
-      <p>Redirect URI: ${process.env. REDIRECT_URI}</p>
+      <p>Redirect URI: ${process.env.REDIRECT_URI}</p>
     `);
   } catch (e) {
     res.status(500).send(e.message);
@@ -366,7 +334,7 @@ app.get("/callback", async (req, res) => {
     const params = new URLSearchParams({
       grant_type: "authorization_code",
       code,
-      redirect_uri: process.env.REDIRECT_URI,
+      redirect_uri: process.env. REDIRECT_URI,
     });
 
     const resp = await axios.post(TOKEN_URL, params.toString(), {
@@ -387,7 +355,7 @@ app.get("/callback", async (req, res) => {
       realmId,
     };
 
-    fs.writeFileSync(TOKEN_PATH, JSON.stringify(data, null, 2));
+    fs. writeFileSync(TOKEN_PATH, JSON.stringify(data, null, 2));
     log("QuickBooks Authorized.");
     res.send("✅ QuickBooks authorized successfully.  You may close this tab.");
   } catch (err) {
@@ -412,7 +380,7 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       phone,
       address,
       customerNumber,
-      amount,
+      amount, // gross (tax-inclusive) entered by user
       receiptNumber,
       date,
       room,
@@ -421,8 +389,7 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       notes,
       taxCode,
       taxAgency,
-      previousTaxCode,
-      method, // ✅ NEW: Payment method from frontend
+      method, // ✅ PAYMENT METHOD FROM FRONTEND
     } = req.body;
 
     if (!name || !email || !amount || !date) {
@@ -436,25 +403,18 @@ app.post("/payment-to-quickbooks", async (req, res) => {
 
     const tokens = await getAccessToken();
     const itemRef = await ensureItemRef(tokens);
+    const taxCodeRef = await resolveTaxCodeRef(tokens, { taxCode, taxAgency });
+    const taxCodeFull = taxCodeRef._full;
+    const combinedRate = extractCombinedRate(taxCodeFull); // e.g. 10
 
-    const taxCtx = await resolveTaxContext(tokens, { taxCode, taxAgency, previousTaxCode });
-    const taxCodeRef = taxCtx.taxCodeRef;
-    const combinedRate = taxCtx.ratePercent;
-
-    const rawNet = grossAmount / (1 + combinedRate / 100);
+    // Compute net & tax from gross inclusive
+    const rawNet = combinedRate > 0 ? (grossAmount / (1 + combinedRate / 100)) : grossAmount;
     const netAmount = +rawNet.toFixed(2);
     const taxAmount = +(grossAmount - netAmount).toFixed(2);
 
-    log("Inclusive calc:", {
-      grossAmount,
-      combinedRate,
-      netAmount,
-      taxAmount,
-      taxCodeId: taxCodeRef.value,
-      taxCodeName: taxCodeRef._full?. Name || null,
-      source: taxCtx.source,
-    });
+    log("Inclusive calc:", { grossAmount, combinedRate, netAmount, taxAmount, taxCodeId: taxCodeRef.value });
 
+    // Customer lookup/create
     let map = fs.existsSync(CUSTOMER_MAP_PATH)
       ? JSON.parse(fs.readFileSync(CUSTOMER_MAP_PATH, "utf8"))
       : {};
@@ -489,15 +449,24 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       fs.writeFileSync(CUSTOMER_MAP_PATH, JSON.stringify(map, null, 2));
     }
 
-    // ✅ Include payment method in description
-    const methodText = method ?  ` | Payment:  ${method. charAt(0).toUpperCase() + method.slice(1)}` : "";
+    // ✅ BUILD DESCRIPTION WITH PAYMENT METHOD
+    const paymentMethodLabel = method 
+      ? (method. charAt(0).toUpperCase() + method.slice(1)) 
+      : "Not Specified";
+
     const desc = [
       `Room: ${room || "-"}`,
       `Check-in: ${checkin || "-"}`,
       `Check-out: ${checkout || "-"}`,
-      `Includes VAT @ ${combinedRate. toFixed(2)}% on EC$${netAmount.toFixed(2)} = EC$${taxAmount.toFixed(2)}${methodText}`
+      `Payment Method: ${paymentMethodLabel}`, // ✅ ADDED
+      `Includes VAT @ ${combinedRate. toFixed(2)}% on EC$${netAmount.toFixed(2)} = EC$${taxAmount.toFixed(2)}`
     ].join(" | ");
 
+    // STRICT INCLUSIVE FIX: 
+    // - Store net in Amount (so future edits don't re-add tax to gross)
+    // - Provide TaxInclusiveAmt with gross
+    // - GlobalTaxCalculation:  TaxInclusive
+    // - Provide TotalTax so QBO doesn't add on top
     const baseReceipt = {
       CustomerRef: { value: customerId },
       TxnDate: date,
@@ -506,27 +475,16 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       TxnTaxDetail: {
         TxnTaxCodeRef: { value: taxCodeRef.value },
         TotalTax: taxAmount,
-        TaxLine: [
-          {
-            Amount: taxAmount,
-            DetailType: "TaxLineDetail",
-            TaxLineDetail: {
-              PercentBased: true,
-              TaxPercent: combinedRate,
-              NetAmountTaxable: netAmount,
-            },
-          },
-        ],
       },
       Line: [
         {
-          Amount: netAmount,
+          Amount: netAmount, // NET
           DetailType: "SalesItemLineDetail",
-          Description: desc,
+          Description: desc, // ✅ NOW INCLUDES PAYMENT METHOD
           SalesItemLineDetail: {
             ItemRef: itemRef,
             TaxCodeRef: { value: taxCodeRef.value },
-            TaxInclusiveAmt: grossAmount,
+            TaxInclusiveAmt: grossAmount, // GROSS
           },
         },
       ],
@@ -548,7 +506,7 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       const msg = JSON.stringify(detail || err);
       if (payload.DocNumber && /DocNumber|Duplicate|duplicate/i.test(msg)) {
         try {
-          const retryPayload = { ...baseReceipt };
+          const retryPayload = { ...baseReceipt }; // without DocNumber
           createResp = await createSalesReceipt(retryPayload);
         } catch (retryErr) {
           log("Retry without DocNumber failed:", retryErr. response?.data || retryErr);
@@ -561,11 +519,12 @@ app.post("/payment-to-quickbooks", async (req, res) => {
 
     const receiptId = createResp.data.SalesReceipt.Id;
 
+    // Fetch stored receipt to confirm QBO interpretation
     let fetched = null;
     try {
       const fetchUrl = `${API_BASE}${tokens.realmId}/salesreceipt/${receiptId}`;
       const fetchResp = await axios.get(fetchUrl, { headers });
-      fetched = fetchResp. data?. SalesReceipt || null;
+      fetched = fetchResp.data?. SalesReceipt || null;
       log("Fetched stored receipt:", JSON.stringify(fetched || {}, null, 2));
     } catch (e) {
       log("Fetch after create failed (non-fatal):", e.response?.data || e);
@@ -577,13 +536,13 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       grossEntered: grossAmount. toFixed(2),
       netCalculated: netAmount.toFixed(2),
       taxCalculated:  taxAmount.toFixed(2),
-      taxRatePercent: combinedRate. toFixed(4),
+      taxRatePercent: combinedRate.toFixed(4),
       mode: "TaxInclusive",
-      source: taxCtx.source,
+      paymentMethod: paymentMethodLabel, // ✅ RETURN IT
       storedReceipt: fetched,
     });
   } catch (err) {
-    log("QuickBooks Error:", err.response?. data || err);
+    log("QuickBooks Error:", err.response?.data || err);
     res.status(500).json({
       error: "Failed to push payment",
       details: err.response?. data || String(err),
