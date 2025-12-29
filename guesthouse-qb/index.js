@@ -5,7 +5,7 @@ const fs = require("fs");
 const path = require("path");
 const cors = require("cors");
 const dotenv = require("dotenv");
-const nodemailer = require("nodemailer"); // ADD THIS LINE
+const nodemailer = require("nodemailer");
 
 dotenv.config();
 
@@ -22,7 +22,7 @@ const API_BASE =
     : "https://sandbox-quickbooks.api. intuit.com/v3/company/";
 
 const SCOPES = [
-  "com.intuit.quickbooks.accounting",
+  "com. intuit.quickbooks.accounting",
   "openid",
   "profile",
   "email",
@@ -45,9 +45,9 @@ const FALLBACK_TAX_PERCENT = parseFloat(process.env.FALLBACK_TAX_PERCENT || "10"
 // -------------------- SMS SETUP --------------------
 const smsTransporter = nodemailer.createTransport({
   service: 'gmail',
-  auth: {
-    user: process.env. GMAIL_USER,
-    pass: process.env.GMAIL_APP_PASSWORD
+  auth:  {
+    user:  process.env. GMAIL_USER,
+    pass: process. env.GMAIL_APP_PASSWORD
   }
 });
 
@@ -55,7 +55,7 @@ smsTransporter.verify((error) => {
   if (error) {
     console.error('❌ Gmail SMS setup failed:', error.message);
   } else {
-    console. log('✅ Gmail SMS ready');
+    console.log('✅ Gmail SMS ready');
   }
 });
 
@@ -93,7 +93,7 @@ app.options("*", (req, res) => {
       "GET,POST,PUT,PATCH,DELETE,OPTIONS"
     );
   }
-  res. sendStatus(200);
+  res.sendStatus(200);
 });
 
 app.use((req, res, next) => {
@@ -125,8 +125,8 @@ function buildAuthUrl() {
 }
 
 async function qboQuery(tokens, q) {
-  const url = `${API_BASE}${tokens.realmId}/query? query=${encodeURIComponent(q)}`;
-  const resp = await axios. get(url, {
+  const url = `${API_BASE}${tokens.realmId}/query?query=${encodeURIComponent(q)}`;
+  const resp = await axios.get(url, {
     headers: { Authorization: `Bearer ${tokens.access_token}`, Accept: "application/json" },
   });
   return resp. data;
@@ -143,7 +143,7 @@ async function getAccessToken() {
   try {
     const params = new URLSearchParams({
       grant_type: "refresh_token",
-      refresh_token: tokens.refresh_token,
+      refresh_token: tokens. refresh_token,
     });
 
     const resp = await axios.post(TOKEN_URL, params. toString(), {
@@ -151,7 +151,7 @@ async function getAccessToken() {
         Authorization: 
           "Basic " +
           Buffer.from(
-            `${process.env.CLIENT_ID}:${process. env.CLIENT_SECRET}`
+            `${process.env.CLIENT_ID}:${process.env.CLIENT_SECRET}`
           ).toString("base64"),
         "Content-Type": "application/x-www-form-urlencoded",
       },
@@ -161,7 +161,7 @@ async function getAccessToken() {
       access_token: resp.data. access_token,
       refresh_token:  resp.data.refresh_token || tokens.refresh_token,
       expires_at: Date.now() + resp.data.expires_in * 1000,
-      realmId: tokens.realmId,
+      realmId: tokens. realmId,
     };
 
     fs.writeFileSync(TOKEN_PATH, JSON.stringify(updated, null, 2));
@@ -180,12 +180,12 @@ async function getAccessToken() {
 // -------------------- ITEM HELPERS --------------------
 async function findItemByName(tokens, name) {
   const data = await qboQuery(tokens, `select * from Item where Name='${name. replace(/'/g, "\\'")}'`);
-  return data. QueryResponse. Item? .[0] || null;
+  return data. QueryResponse.Item? .[0] || null;
 }
 
 async function findAnyIncomeAccount(tokens) {
   const data = await qboQuery(tokens, "select * from Account where AccountType='Income' maxresults 50");
-  return (data.QueryResponse.Account || [])[0] || null;
+  return (data.QueryResponse. Account || [])[0] || null;
 }
 
 async function ensureItemRef(tokens) {
@@ -193,7 +193,7 @@ async function ensureItemRef(tokens) {
     return { value: String(process.env. ITEM_REF_ID), name: DEFAULT_ITEM_NAME };
   }
   let item = await findItemByName(tokens, DEFAULT_ITEM_NAME);
-  if (item) return { value: item.Id, name: item.Name };
+  if (item) return { value: item.Id, name: item. Name };
 
   if (! ALLOW_ITEM_CREATE) {
     throw new Error(`Item '${DEFAULT_ITEM_NAME}' not found and ALLOW_ITEM_CREATE=false`);
@@ -256,7 +256,7 @@ async function resolveTaxCodeRef(tokens, { taxCode, taxAgency } = {}) {
       const match = details.some(d => {
         const rid = d?.TaxRateRef?.value;
         const agency = rid ? rateIdToAgency.get(rid) : null;
-        return agency && (agency.includes(wanted) || wanted. includes(agency));
+        return agency && (agency. includes(wanted) || wanted.includes(agency));
       });
       if (match) {
         const tcFull = await fetchTaxCodeById(tokens, code. Id);
@@ -275,7 +275,7 @@ async function resolveTaxCodeRef(tokens, { taxCode, taxAgency } = {}) {
       const safeName = taxCode.replace(/'/g, "\\'");
       const data = await qboQuery(tokens, `select * from TaxCode where Name='${safeName}'`);
       const tc = data.QueryResponse.TaxCode?.[0];
-      if (!tc) throw new Error(`TaxCode '${taxCode}' not found.`);
+      if (! tc) throw new Error(`TaxCode '${taxCode}' not found.`);
       ref = { value: tc.Id, _full: tc };
     }
   } else if (taxAgency) {
@@ -316,12 +316,12 @@ function extractCombinedRate(taxCodeFull) {
 
 // -------------------- CUSTOMER --------------------
 async function findCustomerByName(displayName, tokens) {
-  const data = await qboQuery(tokens, `select * from Customer where DisplayName='${displayName.replace(/'/g, "\\'")}'`);
-  return data.QueryResponse. Customer?.[0] || null;
+  const data = await qboQuery(tokens, `select * from Customer where DisplayName='${displayName. replace(/'/g, "\\'")}'`);
+  return data.QueryResponse.Customer?.[0] || null;
 }
 
 // -------------------- ROUTES --------------------
-app. get("/health", (_req, res) => {
+app.get("/health", (_req, res) => {
   res. json({
     ok: true,
     env: ENV,
@@ -329,8 +329,8 @@ app. get("/health", (_req, res) => {
     itemName: DEFAULT_ITEM_NAME,
     allowItemCreate: ALLOW_ITEM_CREATE,
     taxCodeProvided: RAW_TAX_CODE || null,
-    taxAgencyProvided: RAW_TAX_AGENCY || null,
-    fallbackTaxPercent:  FALLBACK_TAX_PERCENT,
+    taxAgencyProvided:  RAW_TAX_AGENCY || null,
+    fallbackTaxPercent: FALLBACK_TAX_PERCENT,
   });
 });
 
@@ -360,10 +360,10 @@ app.get("/callback", async (req, res) => {
 
     const resp = await axios.post(TOKEN_URL, params. toString(), {
       headers: {
-        Authorization: 
+        Authorization:
           "Basic " +
-          Buffer. from(
-            `${process.env. CLIENT_ID}: ${process.env. CLIENT_SECRET}`
+          Buffer.from(
+            `${process.env.CLIENT_ID}:${process. env.CLIENT_SECRET}`
           ).toString("base64"),
         "Content-Type": "application/x-www-form-urlencoded",
       },
@@ -385,7 +385,7 @@ app.get("/callback", async (req, res) => {
 });
 
 app.get("/check-token", (_req, res) => {
-  const loggedIn = fs.existsSync(TOKEN_PATH);
+  const loggedIn = fs. existsSync(TOKEN_PATH);
   try {
     res.json({ loggedIn, authUrl: loggedIn ? null : buildAuthUrl() });
   } catch (e) {
@@ -408,17 +408,17 @@ app.post('/send-sms', async (req, res) => {
     // Flow (formerly Lime) SMS gateway for St. Kitts
     const smsEmail = `1869${cleanPhone}@msg.flow.com`;
     
-    await smsTransporter.sendMail({
+    await smsTransporter. sendMail({
       from: process.env. GMAIL_USER,
       to: smsEmail,
-      subject:  '',
+      subject: '',
       text: message. substring(0, 160) // SMS limit
     });
     
     log(`✅ SMS sent to ${cleanPhone}`);
     res.json({ success: true, phone: cleanPhone });
   } catch (error) {
-    log('❌ SMS error:', error.message);
+    log('❌ SMS error:', error. message);
     res.status(500).json({ error: error.message });
   }
 });
@@ -440,12 +440,12 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       checkout,
       notes,
       specialOffer,
-      method, // <-- PAYMENT METHOD ADDED
+      method,
       taxCode,
       taxAgency,
     } = req.body;
 
-    if (! name || !email || !amount || !date) {
+    if (!name || !email || !amount || !date) {
       return res.status(400).json({ error: "Missing fields" });
     }
 
@@ -506,14 +506,14 @@ app.post("/payment-to-quickbooks", async (req, res) => {
           },
           { headers }
         );
-        customerId = custResp.data. Customer.Id;
+        customerId = custResp.data. Customer. Id;
       }
       map[key] = customerId;
       fs.writeFileSync(CUSTOMER_MAP_PATH, JSON. stringify(map, null, 2));
     }
 
     // Format payment method for display
-    const paymentMethodDisplay = method 
+    const paymentMethodDisplay = method
       ? method. charAt(0).toUpperCase() + method.slice(1).toLowerCase()
       : "N/A";
 
@@ -522,7 +522,7 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       `Room: ${room || "-"}`,
       `Check-in: ${checkin || "-"}`,
       `Check-out: ${checkout || "-"}`,
-      `Payment: ${paymentMethodDisplay}`, // <-- PAYMENT METHOD IN DESCRIPTION
+      `Payment: ${paymentMethodDisplay}`,
       specialOffer ? `Offer: ${specialOffer}` : null,
       `VAT @ ${combinedRate. toFixed(2)}% = EC$${taxAmount.toFixed(2)}`
     ].filter(Boolean).join(" | ");
@@ -611,7 +611,7 @@ app.post("/payment-to-quickbooks", async (req, res) => {
 
 // -------------------- START --------------------
 const PORT = process.env.PORT || 3000;
-app. listen(PORT, () => {
+app.listen(PORT, () => {
   log(`🚀 Server running on port ${PORT}`);
   try {
     log("Authorize URL:", buildAuthUrl());
