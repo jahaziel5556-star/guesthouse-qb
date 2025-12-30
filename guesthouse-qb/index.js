@@ -46,7 +46,7 @@ const FALLBACK_TAX_PERCENT = parseFloat(process.env.FALLBACK_TAX_PERCENT || "10"
 const smsTransporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
-    user: process.env. GMAIL_USER,
+    user: process.env.GMAIL_USER,
     pass: process.env.GMAIL_APP_PASSWORD
   }
 });
@@ -125,11 +125,11 @@ function buildAuthUrl() {
 }
 
 async function qboQuery(tokens, q) {
-  const url = `${API_BASE}${tokens. realmId}/query?query=${encodeURIComponent(q)}`;
+  const url = `${API_BASE}${tokens. realmId}/query? query=${encodeURIComponent(q)}`;
   const resp = await axios.get(url, {
     headers: { Authorization: `Bearer ${tokens.access_token}`, Accept: "application/json" },
   });
-  return resp. data;
+  return resp.data;
 }
 
 // -------------------- TOKEN MANAGEMENT --------------------
@@ -143,7 +143,7 @@ async function getAccessToken() {
   try {
     const params = new URLSearchParams({
       grant_type: "refresh_token",
-      refresh_token: tokens. refresh_token,
+      refresh_token: tokens.refresh_token,
     });
 
     const resp = await axios.post(TOKEN_URL, params. toString(), {
@@ -168,7 +168,7 @@ async function getAccessToken() {
     log("Token refreshed.");
     return updated;
   } catch (err) {
-    log("Token refresh failed:", err.response?. data || err);
+    log("Token refresh failed:", err.response?.data || err);
     if (JSON.stringify(err).includes("invalid_grant")) {
       try { fs.unlinkSync(TOKEN_PATH); } catch {}
       log("tokens.json deleted due to invalid_grant");
@@ -180,7 +180,7 @@ async function getAccessToken() {
 // -------------------- ITEM HELPERS --------------------
 async function findItemByName(tokens, name) {
   const data = await qboQuery(tokens, `select * from Item where Name='${name. replace(/'/g, "\\'")}'`);
-  return data. QueryResponse. Item? .[0] || null;
+  return data. QueryResponse.Item? .[0] || null;
 }
 
 async function findAnyIncomeAccount(tokens) {
@@ -200,7 +200,7 @@ async function ensureItemRef(tokens) {
   }
 
   const incomeAccount = await findAnyIncomeAccount(tokens);
-  if (!incomeAccount) throw new Error("No Income account found to attach new Item.");
+  if (! incomeAccount) throw new Error("No Income account found to attach new Item.");
 
   const resp = await axios.post(
     `${API_BASE}${tokens.realmId}/item`,
@@ -225,7 +225,7 @@ async function ensureItemRef(tokens) {
 // -------------------- TAX CODE RESOLUTION --------------------
 async function fetchTaxCodeById(tokens, id) {
   const data = await qboQuery(tokens, `select * from TaxCode where Id='${String(id)}'`);
-  return data.QueryResponse.TaxCode?.[0] || null;
+  return data.QueryResponse.TaxCode? .[0] || null;
 }
 
 async function resolveTaxCodeRef(tokens, { taxCode, taxAgency } = {}) {
@@ -256,7 +256,7 @@ async function resolveTaxCodeRef(tokens, { taxCode, taxAgency } = {}) {
       const match = details.some(d => {
         const rid = d?.TaxRateRef?.value;
         const agency = rid ? rateIdToAgency.get(rid) : null;
-        return agency && (agency.includes(wanted) || wanted. includes(agency));
+        return agency && (agency.includes(wanted) || wanted.includes(agency));
       });
       if (match) {
         const tcFull = await fetchTaxCodeById(tokens, code. Id);
@@ -300,7 +300,7 @@ async function resolveTaxCodeRef(tokens, { taxCode, taxAgency } = {}) {
     const hit = list.find(tc => /vat/i.test(tc.Name || ""));
     if (! hit) throw new Error("No VAT TaxCode found in company.");
     const tcFull = await fetchTaxCodeById(tokens, hit.Id);
-    ref = { value: hit.Id, _full: tcFull || hit };
+    ref = { value: hit. Id, _full:  tcFull || hit };
   }
 
   return ref;
@@ -308,7 +308,7 @@ async function resolveTaxCodeRef(tokens, { taxCode, taxAgency } = {}) {
 
 function extractCombinedRate(taxCodeFull) {
   if (!taxCodeFull?. TaxRateList?.TaxRateDetail) return 0;
-  return taxCodeFull.TaxRateList. TaxRateDetail.reduce((sum, d) => {
+  return taxCodeFull. TaxRateList.TaxRateDetail.reduce((sum, d) => {
     const rate = parseFloat(d.RateValue ??  0);
     return sum + (isNaN(rate) ? 0 :  rate);
   }, 0);
@@ -316,8 +316,8 @@ function extractCombinedRate(taxCodeFull) {
 
 // -------------------- CUSTOMER --------------------
 async function findCustomerByName(displayName, tokens) {
-  const data = await qboQuery(tokens, `select * from Customer where DisplayName='${displayName. replace(/'/g, "\\'")}'`);
-  return data.QueryResponse.Customer?.[0] || null;
+  const data = await qboQuery(tokens, `select * from Customer where DisplayName='${displayName.replace(/'/g, "\\'")}'`);
+  return data.QueryResponse. Customer?.[0] || null;
 }
 
 // -------------------- ROUTES --------------------
@@ -349,7 +349,7 @@ app.get("/auth", (_req, res) => {
 
 app.get("/callback", async (req, res) => {
   const { code, realmId } = req.query;
-  if (!code || !realmId)
+  if (!code || ! realmId)
     return res. status(400).send("Missing ? code or ?realmId");
   try {
     const params = new URLSearchParams({
@@ -380,7 +380,7 @@ app.get("/callback", async (req, res) => {
     log("QuickBooks Authorized.");
     res.send("✅ QuickBooks authorized successfully.  You may close this tab.");
   } catch (err) {
-    res.status(500).send(`❌ Error:  ${JSON.stringify(err. response?.data || err)}`);
+    res.status(500).send(`❌ Error: ${JSON.stringify(err. response?.data || err)}`);
   }
 });
 
@@ -418,7 +418,7 @@ app. post('/send-sms', async (req, res) => {
     log(`✅ SMS sent to ${cleanPhone}`);
     res.json({ success: true, phone: cleanPhone });
   } catch (error) {
-    log('❌ SMS error:', error.message);
+    log('❌ SMS error:', error. message);
     res.status(500).json({ error: error.message });
   }
 });
@@ -472,7 +472,7 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       combinedRate,
       netAmount,
       taxAmount,
-      taxCodeId: taxCodeRef. value,
+      taxCodeId: taxCodeRef.value,
       taxCodeName: taxCodeFull?. Name || null,
       paymentMethod: method || "N/A",
     });
@@ -495,7 +495,7 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       if (found) {
         customerId = found.Id;
       } else {
-        const custResp = await axios. post(
+        const custResp = await axios.post(
           `${API_BASE}${tokens.realmId}/customer`,
           {
             DisplayName: name,
@@ -506,7 +506,7 @@ app.post("/payment-to-quickbooks", async (req, res) => {
           },
           { headers }
         );
-        customerId = custResp.data. Customer.Id;
+        customerId = custResp.data. Customer. Id;
       }
       map[key] = customerId;
       fs.writeFileSync(CUSTOMER_MAP_PATH, JSON. stringify(map, null, 2));
@@ -533,7 +533,7 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       PrivateNote: notes || "",
       GlobalTaxCalculation: "TaxInclusive",
       TxnTaxDetail: {
-        TxnTaxCodeRef: { value:  taxCodeRef.value },
+        TxnTaxCodeRef: { value: taxCodeRef.value },
         TotalTax: taxAmount,
       },
       Line:  [
@@ -595,7 +595,7 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       grossEntered: grossAmount. toFixed(2),
       netCalculated: netAmount. toFixed(2),
       taxCalculated: taxAmount.toFixed(2),
-      taxRatePercent: combinedRate. toFixed(4),
+      taxRatePercent: combinedRate.toFixed(4),
       paymentMethod: paymentMethodDisplay,
       mode: "TaxInclusive",
       storedReceipt:  fetched,
