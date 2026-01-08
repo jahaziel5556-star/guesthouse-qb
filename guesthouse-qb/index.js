@@ -395,8 +395,8 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       taxAgency,
     } = req.body;
 
-    if (!name || !email || !amount || !date) {
-      return res.status(400).json({ error: "Missing fields" });
+    if (!name || amount === undefined || amount === null || !date) {
+      return res.status(400).json({ error: "Missing fields: name, amount, and date are required" });
     }
 
     const grossAmount = parseFloat(amount);
@@ -432,7 +432,7 @@ app.post("/payment-to-quickbooks", async (req, res) => {
     let map = fs.existsSync(CUSTOMER_MAP_PATH)
       ? JSON.parse(fs.readFileSync(CUSTOMER_MAP_PATH, "utf8"))
       : {};
-    const key = `${name}_${email}`.toLowerCase();
+    const key = `${name}_${email || "noemail"}`.toLowerCase();
     let customerId = map[key];
 
     const headers = {
@@ -450,7 +450,7 @@ app.post("/payment-to-quickbooks", async (req, res) => {
           `${API_BASE}${tokens.realmId}/customer`,
           {
             DisplayName: name,
-            PrimaryEmailAddr: { Address: email },
+            PrimaryEmailAddr: email ? { Address: email } : undefined,
             PrimaryPhone: phone ? { FreeFormNumber: phone } : undefined,
             BillAddr: { Line1: address || "N/A" },
             ResaleNum: customerNumber || "",
