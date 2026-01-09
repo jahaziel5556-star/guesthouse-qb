@@ -7,7 +7,7 @@
  *              Handles OAuth authentication, sales receipts, and customer sync.
  * 
  * @version 2.0.0
- * @author Glimbaro Guest House Development Team
+ * @author Jahaziel
  * 
  * TABLE OF CONTENTS:
  * ──────────────────────────────────────────────────────────────────────────────
@@ -1024,3 +1024,4 @@ app.listen(PORT, () => {
     log("Authorize URL:", buildAuthUrl());
   } catch {}
 });
+
