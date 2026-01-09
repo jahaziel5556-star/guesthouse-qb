@@ -7,7 +7,7 @@
  *              Handles OAuth authentication, sales receipts, and customer sync.
  * 
  * @version 2.0.0
- * @author Glimbaro Guest House Development Team
+ * @author Jahaziel
  * 
  * TABLE OF CONTENTS:
  * ──────────────────────────────────────────────────────────────────────────────
@@ -50,7 +50,7 @@ const log = (...args) => console.log(`[${new Date().toISOString()}]`, ...args);
 /** Rate limiting - in-memory implementation */
 const rateLimitMap = new Map();
 const RATE_LIMIT_WINDOW = 60000; // 1 minute
-const RATE_LIMIT_MAX = 100;      // max requests per window
+const RATE_LIMIT_MAX = 300;      // max requests per window (increased for testing)
 
 /**
  * Rate limiting middleware
@@ -372,6 +372,15 @@ const TOKEN_PATH = path.join(__dirname, "tokens.json");
 /** Path to store customer ID mappings */
 const CUSTOMER_MAP_PATH = path.join(__dirname, "customers.json");
 
+/** Cache for QuickBooks data to reduce API calls */
+const qbCache = {
+  itemRef: null,           // Cached item reference
+  itemRefExpiry: 0,        // Cache expiry timestamp
+  taxCodeRefs: new Map(),  // Cached tax code references by key
+  taxCodeExpiry: 0,        // Cache expiry timestamp
+  CACHE_TTL: 3600000       // 1 hour cache TTL
+};
+
 /** Default item name for sales receipts */
 const DEFAULT_ITEM_NAME = process.env.ITEM_NAME || "Accommodation";
 
@@ -556,6 +565,7 @@ async function findAnyIncomeAccount(tokens) {
 
 /**
  * Ensure an item reference exists (find or create)
+ * Uses caching to reduce QuickBooks API calls
  * @param {Object} tokens - OAuth tokens
  * @returns {Promise<Object>} Item reference {value, name}
  * @throws {Error} If item not found and creation not allowed
@@ -564,8 +574,19 @@ async function ensureItemRef(tokens) {
   if (process.env.ITEM_REF_ID) {
     return { value: String(process.env.ITEM_REF_ID), name: DEFAULT_ITEM_NAME };
   }
+  
+  // Return cached item if still valid
+  if (qbCache.itemRef && Date.now() < qbCache.itemRefExpiry) {
+    log("Using cached itemRef");
+    return qbCache.itemRef;
+  }
+  
   let item = await findItemByName(tokens, DEFAULT_ITEM_NAME);
-  if (item) return { value: item.Id, name: item.Name };
+  if (item) {
+    qbCache.itemRef = { value: item.Id, name: item.Name };
+    qbCache.itemRefExpiry = Date.now() + qbCache.CACHE_TTL;
+    return qbCache.itemRef;
+  }
 
   if (!ALLOW_ITEM_CREATE) {
     throw new Error(`Item '${DEFAULT_ITEM_NAME}' not found and ALLOW_ITEM_CREATE=false`);
@@ -591,7 +612,10 @@ async function ensureItemRef(tokens) {
     }
   );
   item = resp.data.Item;
-  return { value: item.Id, name: item.Name };
+  // Cache the newly created item
+  qbCache.itemRef = { value: item.Id, name: item.Name };
+  qbCache.itemRefExpiry = Date.now() + qbCache.CACHE_TTL;
+  return qbCache.itemRef;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -612,12 +636,22 @@ async function fetchTaxCodeById(tokens, id) {
 /**
  * Resolve a TaxCode reference by code, agency, or environment config
  * Searches by ID, name, or tax agency association
+ * Uses caching to reduce QuickBooks API calls
  * @param {Object} tokens - OAuth tokens
  * @param {Object} options - {taxCode, taxAgency} optional overrides
  * @returns {Promise<Object>} TaxCode reference with _full property
  * @throws {Error} If no matching TaxCode found
  */
 async function resolveTaxCodeRef(tokens, { taxCode, taxAgency } = {}) {
+  // Build cache key from parameters
+  const cacheKey = `${taxCode || ''}_${taxAgency || ''}_${RAW_TAX_CODE}_${RAW_TAX_AGENCY}`;
+  
+  // Return cached tax code if still valid
+  if (qbCache.taxCodeRefs.has(cacheKey) && Date.now() < qbCache.taxCodeExpiry) {
+    log("Using cached taxCodeRef");
+    return qbCache.taxCodeRefs.get(cacheKey);
+  }
+  
   let ref = null;
 
   const resolveByAgency = async (agencyRaw) => {
@@ -692,6 +726,10 @@ async function resolveTaxCodeRef(tokens, { taxCode, taxAgency } = {}) {
     ref = { value: hit.Id, _full: tcFull || hit };
   }
 
+  // Cache the resolved tax code
+  qbCache.taxCodeRefs.set(cacheKey, ref);
+  qbCache.taxCodeExpiry = Date.now() + qbCache.CACHE_TTL;
+  
   return ref;
 }
 
@@ -981,16 +1019,8 @@ app.post("/payment-to-quickbooks", async (req, res) => {
 
     const receiptId = createResp.data.SalesReceipt.Id;
 
-    // Fetch stored receipt to confirm QBO interpretation
-    let fetched = null;
-    try {
-      const fetchUrl = `${API_BASE}${tokens.realmId}/salesreceipt/${receiptId}`;
-      const fetchResp = await axios.get(fetchUrl, { headers });
-      fetched = fetchResp.data?.SalesReceipt || null;
-      log("Fetched stored receipt:", JSON.stringify(fetched || {}, null, 2));
-    } catch (e) {
-      log("Fetch after create failed (non-fatal):", e.response?.data || e);
-    }
+    // Note: Removed fetch after create to reduce QuickBooks API calls
+    // The create response already contains the receipt data we need
 
     res.json({
       success: true,
