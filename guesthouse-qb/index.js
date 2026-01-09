@@ -1,4 +1,34 @@
-// index.js - QuickBooks backend (guaranteed tax-inclusive totals: persist net line amount + explicit tax with TaxInclusive + fallback VAT%)
+/**
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * GLIMBARO GUEST HOUSE - QUICKBOOKS INTEGRATION BACKEND
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * 
+ * @description Express.js backend server for QuickBooks payment integration.
+ *              Handles OAuth authentication, sales receipts, and customer sync.
+ * 
+ * @version 2.0.0
+ * @author Glimbaro Guest House Development Team
+ * 
+ * TABLE OF CONTENTS:
+ * ──────────────────────────────────────────────────────────────────────────────
+ * 1.  IMPORTS & INITIALIZATION
+ * 2.  SECURITY MIDDLEWARE
+ * 3.  INPUT SANITIZATION
+ * 4.  CONFIGURATION
+ * 5.  CORS SETUP
+ * 6.  TOKEN MANAGEMENT
+ * 7.  QUICKBOOKS API UTILITIES
+ * 8.  TAX CODE RESOLUTION
+ * 9.  CUSTOMER MANAGEMENT
+ * 10. API ROUTES
+ * 11. SERVER STARTUP
+ * ═══════════════════════════════════════════════════════════════════════════════
+ */
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SECTION 1: IMPORTS & INITIALIZATION
+// ═══════════════════════════════════════════════════════════════════════════════
+
 const express = require("express");
 const axios = require("axios");
 const fs = require("fs");
@@ -9,17 +39,312 @@ const dotenv = require("dotenv");
 dotenv.config();
 
 const app = express();
-app.use(express.json());
 
-// -------------------- CONFIG --------------------
+/** Simple console logger with timestamp */
+const log = (...args) => console.log(`[${new Date().toISOString()}]`, ...args);
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SECTION 2: SECURITY MIDDLEWARE
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/** Rate limiting - in-memory implementation */
+const rateLimitMap = new Map();
+const RATE_LIMIT_WINDOW = 60000; // 1 minute
+const RATE_LIMIT_MAX = 100;      // max requests per window
+
+/**
+ * Rate limiting middleware
+ * Limits requests per IP address to prevent abuse
+ */
+function rateLimit(req, res, next) {
+  const ip = req.ip || req.connection.remoteAddress || 'unknown';
+  const now = Date.now();
+  
+  if (!rateLimitMap.has(ip)) {
+    rateLimitMap.set(ip, { count: 1, startTime: now });
+    return next();
+  }
+  
+  const record = rateLimitMap.get(ip);
+  if (now - record.startTime > RATE_LIMIT_WINDOW) {
+    rateLimitMap.set(ip, { count: 1, startTime: now });
+    return next();
+  }
+  
+  record.count++;
+  if (record.count > RATE_LIMIT_MAX) {
+    return res.status(429).json({ error: 'Too many requests. Please try again later.' });
+  }
+  
+  next();
+}
+
+// Cleanup old rate limit entries every 5 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, record] of rateLimitMap.entries()) {
+    if (now - record.startTime > RATE_LIMIT_WINDOW * 2) {
+      rateLimitMap.delete(ip);
+    }
+  }
+}, 300000);
+
+/**
+ * Security headers middleware
+ * Sets various HTTP headers to enhance security
+ */
+function securityHeaders(req, res, next) {
+  // Prevent clickjacking
+  res.setHeader('X-Frame-Options', 'DENY');
+  // Prevent MIME type sniffing
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  // Enable XSS filter
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  // Referrer policy
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  // Content Security Policy
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'");
+  // Strict Transport Security (HTTPS only)
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  // Permissions Policy
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  next();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SECTION 3: INPUT SANITIZATION
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Sanitize a string by removing potential HTML tags and limiting length
+ * @param {string} str - Input string
+ * @param {number} maxLength - Maximum allowed length
+ * @returns {string} Sanitized string
+ */
+function sanitizeString(str, maxLength = 500) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/[<>]/g, '') // Remove potential HTML tags
+    .trim()
+    .slice(0, maxLength);
+}
+
+/**
+ * Sanitize and validate email address
+ * @param {string} email - Email address to sanitize
+ * @returns {string} Sanitized email or empty string if invalid
+ */
+function sanitizeEmail(email) {
+  if (!email) return '';
+  const cleaned = String(email).toLowerCase().trim().slice(0, 254);
+  const emailRegex = /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/;
+  return emailRegex.test(cleaned) ? cleaned : '';
+}
+
+/**
+ * Sanitize phone number - allow only digits, spaces, +, -, ()
+ * @param {string} phone - Phone number to sanitize
+ * @returns {string} Sanitized phone number
+ */
+function sanitizePhone(phone) {
+  if (!phone) return '';
+  return String(phone).replace(/[^\d\s+\-()]/g, '').trim().slice(0, 20);
+}
+
+/**
+ * Sanitize and validate monetary amount
+ * @param {*} amount - Amount to sanitize
+ * @returns {number|null} Sanitized amount or null if invalid
+ */
+function sanitizeAmount(amount) {
+  const num = parseFloat(amount);
+  if (isNaN(num) || num < 0 || num > 10000000) return null;
+  return Math.round(num * 100) / 100;
+}
+
+/**
+ * Sanitize and validate date string (YYYY-MM-DD format)
+ * @param {string} dateStr - Date string to sanitize
+ * @returns {string} Valid date string or empty string
+ */
+function sanitizeDate(dateStr) {
+  if (!dateStr) return '';
+  const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+  if (!dateRegex.test(dateStr)) return '';
+  const d = new Date(dateStr + 'T00:00:00');
+  if (isNaN(d.getTime())) return '';
+  return dateStr;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SECTION 2 (CONTINUED): IP BLOCKING & SUSPICIOUS ACTIVITY TRACKING
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/** Set of blocked IP addresses */
+const blockedIPs = new Set();
+
+/** Map tracking suspicious activity by IP */
+const suspiciousActivity = new Map();
+
+/** Maximum suspicious score before IP is blocked */
+const MAX_SUSPICIOUS_SCORE = 10;
+
+/**
+ * Track suspicious activity for an IP address
+ * Blocks IP if score exceeds threshold
+ * @param {string} ip - IP address
+ * @param {number} score - Score to add (default: 1)
+ * @returns {boolean} True if IP was blocked
+ */
+function trackSuspiciousActivity(ip, score = 1) {
+  const current = suspiciousActivity.get(ip) || { score: 0, firstSeen: Date.now() };
+  
+  // Reset after 1 hour
+  if (Date.now() - current.firstSeen > 3600000) {
+    current.score = score;
+    current.firstSeen = Date.now();
+  } else {
+    current.score += score;
+  }
+  
+  suspiciousActivity.set(ip, current);
+  
+  if (current.score >= MAX_SUSPICIOUS_SCORE) {
+    blockedIPs.add(ip);
+    log(`[SECURITY] IP blocked due to suspicious activity: ${ip}`);
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Middleware to block requests from banned IPs
+ */
+function ipBlockingMiddleware(req, res, next) {
+  const ip = req.ip || req.connection.remoteAddress || 'unknown';
+  
+  if (blockedIPs.has(ip)) {
+    log(`[SECURITY] Blocked request from banned IP: ${ip}`);
+    return res.status(403).json({ error: 'Access denied' });
+  }
+  
+  next();
+}
+
+/**
+ * Middleware to validate incoming requests for attack patterns
+ * Checks URL and request body for common attack signatures
+ */
+function validateRequestMiddleware(req, res, next) {
+  const ip = req.ip || req.connection.remoteAddress || 'unknown';
+  
+  // Check for suspicious headers
+  const userAgent = req.headers['user-agent'] || '';
+  if (!userAgent || userAgent.length < 10) {
+    trackSuspiciousActivity(ip, 2);
+  }
+  
+  // Check for common attack patterns in URL
+  const url = req.originalUrl || req.url || '';
+  const attackPatterns = [
+    /\.\.\//, // Path traversal
+    /<script/i, // XSS attempt
+    /\bunion\b.*\bselect\b/i, // SQL injection
+    /\bexec\b.*\bxp_/i, // SQL injection
+    /\b(cmd|powershell|bash)\b/i, // Command injection
+    /%00/, // Null byte injection
+    /\.(php|asp|aspx|jsp|cgi)$/i // Probing for vulnerabilities
+  ];
+  
+  for (const pattern of attackPatterns) {
+    if (pattern.test(url)) {
+      trackSuspiciousActivity(ip, 5);
+      log(`[SECURITY] Attack pattern detected in URL from ${ip}: ${url.slice(0, 100)}`);
+      return res.status(400).json({ error: 'Invalid request' });
+    }
+  }
+  
+  // Check request body for suspicious patterns if JSON
+  if (req.body && typeof req.body === 'object') {
+    const bodyStr = JSON.stringify(req.body);
+    for (const pattern of attackPatterns) {
+      if (pattern.test(bodyStr)) {
+        trackSuspiciousActivity(ip, 5);
+        log(`[SECURITY] Attack pattern detected in body from ${ip}`);
+        return res.status(400).json({ error: 'Invalid request' });
+      }
+    }
+  }
+  
+  next();
+}
+
+/**
+ * Audit logging middleware
+ * Logs request details and tracks failed requests for security monitoring
+ */
+function auditLogMiddleware(req, res, next) {
+  const startTime = Date.now();
+  const ip = req.ip || req.connection.remoteAddress || 'unknown';
+  
+  res.on('finish', () => {
+    const duration = Date.now() - startTime;
+    const logEntry = {
+      timestamp: new Date().toISOString(),
+      method: req.method,
+      path: req.path,
+      status: res.statusCode,
+      duration: `${duration}ms`,
+      ip: ip,
+      userAgent: (req.headers['user-agent'] || '').slice(0, 100)
+    };
+    
+    // Log errors and suspicious responses
+    if (res.statusCode >= 400) {
+      log(`[AUDIT] ${logEntry.method} ${logEntry.path} - ${logEntry.status} (${logEntry.duration}) from ${ip}`);
+      
+      // Track failed requests
+      if (res.statusCode === 401 || res.statusCode === 403) {
+        trackSuspiciousActivity(ip, 2);
+      }
+    }
+  });
+  
+  next();
+}
+
+// Apply security middleware stack
+app.use(ipBlockingMiddleware);
+app.use(rateLimit);
+app.use(securityHeaders);
+app.use(auditLogMiddleware);
+
+// Body parser with size limit to prevent DoS attacks
+app.use(express.json({ limit: '100kb' }));
+
+// Apply request validation after body parsing
+app.use(validateRequestMiddleware);
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SECTION 4: CONFIGURATION
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/** Environment (production/sandbox) */
 const ENV = (process.env.ENVIRONMENT || "production").toLowerCase();
+
+/** OAuth authorization base URL */
 const AUTH_BASE = "https://appcenter.intuit.com/connect/oauth2";
+
+/** OAuth token exchange URL */
 const TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer";
+
+/** QuickBooks API base URL (varies by environment) */
 const API_BASE =
   ENV === "production"
     ? "https://quickbooks.api.intuit.com/v3/company/"
     : "https://sandbox-quickbooks.api.intuit.com/v3/company/";
 
+/** OAuth scopes requested */
 const SCOPES = [
   "com.intuit.quickbooks.accounting",
   "openid",
@@ -29,20 +354,36 @@ const SCOPES = [
   "address",
 ].join(" ");
 
+/** Path to store OAuth tokens */
 const TOKEN_PATH = path.join(__dirname, "tokens.json");
+
+/** Path to store customer ID mappings */
 const CUSTOMER_MAP_PATH = path.join(__dirname, "customers.json");
 
+/** Default item name for sales receipts */
 const DEFAULT_ITEM_NAME = process.env.ITEM_NAME || "Accommodation";
+
+/** Whether to auto-create items if not found */
 const ALLOW_ITEM_CREATE =
   (process.env.ALLOW_ITEM_CREATE || "true").toLowerCase() === "true";
 
+/** Tax code from environment (ID or name) */
 const RAW_TAX_CODE = (process.env.QB_TAX_CODE || "").trim();
+
+/** Tax agency from environment */
 const RAW_TAX_AGENCY = (process.env.QB_TAX_AGENCY || "").trim();
 
-// NEW: Fallback VAT percent when QuickBooks returns 0% for your TaxCode
+/** 
+ * Fallback VAT percent when QuickBooks returns 0% for your TaxCode
+ * Used when TaxRateList is empty or rate is 0
+ */
 const FALLBACK_TAX_PERCENT = parseFloat(process.env.FALLBACK_TAX_PERCENT || "10");
 
-// -------------------- CORS --------------------
+// ═══════════════════════════════════════════════════════════════════════════════
+// SECTION 5: CORS SETUP
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/** Allowed CORS origins from environment or default */
 const ALLOWED_ORIGINS = (
   process.env.CORS_ORIGINS ||
   "https://r-system-33a06.web.app"
@@ -51,6 +392,7 @@ const ALLOWED_ORIGINS = (
   .map((s) => s.trim())
   .filter(Boolean);
 
+// Configure CORS middleware
 app.use(
   cors({
     origin(origin, cb) {
@@ -62,6 +404,7 @@ app.use(
   })
 );
 
+// Handle CORS preflight requests
 app.options("*", (req, res) => {
   const origin = req.headers.origin;
   if (origin && ALLOWED_ORIGINS.includes(origin)) {
@@ -79,6 +422,7 @@ app.options("*", (req, res) => {
   res.sendStatus(200);
 });
 
+// Add CORS headers to all responses
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   if (origin && ALLOWED_ORIGINS.includes(origin)) {
@@ -88,12 +432,15 @@ app.use((req, res, next) => {
   next();
 });
 
-// -------------------- LOGGING --------------------
-function log(...a) {
-  console.log(new Date().toISOString(), ...a);
-}
+// ═══════════════════════════════════════════════════════════════════════════════
+// SECTION 6: TOKEN MANAGEMENT
+// ═══════════════════════════════════════════════════════════════════════════════
 
-// -------------------- UTILITIES --------------------
+/**
+ * Build OAuth authorization URL
+ * @returns {string} Authorization URL
+ * @throws {Error} If CLIENT_ID or REDIRECT_URI not configured
+ */
 function buildAuthUrl() {
   if (!process.env.CLIENT_ID || !process.env.REDIRECT_URI) {
     throw new Error("Missing CLIENT_ID or REDIRECT_URI");
@@ -107,6 +454,16 @@ function buildAuthUrl() {
   );
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// SECTION 7: QUICKBOOKS API UTILITIES
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Execute a QuickBooks query
+ * @param {Object} tokens - OAuth tokens with realmId
+ * @param {string} q - Query string
+ * @returns {Promise<Object>} Query response data
+ */
 async function qboQuery(tokens, q) {
   const url = `${API_BASE}${tokens.realmId}/query?query=${encodeURIComponent(q)}`;
   const resp = await axios.get(url, {
@@ -115,7 +472,11 @@ async function qboQuery(tokens, q) {
   return resp.data;
 }
 
-// -------------------- TOKEN MANAGEMENT --------------------
+/**
+ * Get valid access token, refreshing if necessary
+ * @returns {Promise<Object>} Valid tokens object
+ * @throws {Error} If not authenticated or refresh fails
+ */
 async function getAccessToken() {
   if (!fs.existsSync(TOKEN_PATH))
     throw new Error("Not authenticated with QuickBooks.");
@@ -160,17 +521,33 @@ async function getAccessToken() {
   }
 }
 
-// -------------------- ITEM HELPERS --------------------
+/**
+ * Find an item by name in QuickBooks
+ * @param {Object} tokens - OAuth tokens
+ * @param {string} name - Item name to search for
+ * @returns {Promise<Object|null>} Item object or null if not found
+ */
 async function findItemByName(tokens, name) {
   const data = await qboQuery(tokens, `select * from Item where Name='${name.replace(/'/g, "\\'")}'`);
   return data.QueryResponse.Item?.[0] || null;
 }
 
+/**
+ * Find any income account (used for creating new items)
+ * @param {Object} tokens - OAuth tokens
+ * @returns {Promise<Object|null>} First income account or null
+ */
 async function findAnyIncomeAccount(tokens) {
   const data = await qboQuery(tokens, "select * from Account where AccountType='Income' maxresults 50");
   return (data.QueryResponse.Account || [])[0] || null;
 }
 
+/**
+ * Ensure an item reference exists (find or create)
+ * @param {Object} tokens - OAuth tokens
+ * @returns {Promise<Object>} Item reference {value, name}
+ * @throws {Error} If item not found and creation not allowed
+ */
 async function ensureItemRef(tokens) {
   if (process.env.ITEM_REF_ID) {
     return { value: String(process.env.ITEM_REF_ID), name: DEFAULT_ITEM_NAME };
@@ -205,12 +582,29 @@ async function ensureItemRef(tokens) {
   return { value: item.Id, name: item.Name };
 }
 
-// -------------------- TAX CODE RESOLUTION --------------------
+// ═══════════════════════════════════════════════════════════════════════════════
+// SECTION 8: TAX CODE RESOLUTION
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Fetch a TaxCode by its ID
+ * @param {Object} tokens - OAuth tokens
+ * @param {string} id - TaxCode ID
+ * @returns {Promise<Object|null>} TaxCode object or null
+ */
 async function fetchTaxCodeById(tokens, id) {
   const data = await qboQuery(tokens, `select * from TaxCode where Id='${String(id)}'`);
   return data.QueryResponse.TaxCode?.[0] || null;
 }
 
+/**
+ * Resolve a TaxCode reference by code, agency, or environment config
+ * Searches by ID, name, or tax agency association
+ * @param {Object} tokens - OAuth tokens
+ * @param {Object} options - {taxCode, taxAgency} optional overrides
+ * @returns {Promise<Object>} TaxCode reference with _full property
+ * @throws {Error} If no matching TaxCode found
+ */
 async function resolveTaxCodeRef(tokens, { taxCode, taxAgency } = {}) {
   let ref = null;
 
@@ -289,6 +683,11 @@ async function resolveTaxCodeRef(tokens, { taxCode, taxAgency } = {}) {
   return ref;
 }
 
+/**
+ * Extract combined tax rate from a TaxCode's TaxRateList
+ * @param {Object} taxCodeFull - Full TaxCode object with TaxRateList
+ * @returns {number} Combined tax rate percentage
+ */
 function extractCombinedRate(taxCodeFull) {
   if (!taxCodeFull?.TaxRateList?.TaxRateDetail) return 0;
   return taxCodeFull.TaxRateList.TaxRateDetail.reduce((sum, d) => {
@@ -297,13 +696,29 @@ function extractCombinedRate(taxCodeFull) {
   }, 0);
 }
 
-// -------------------- CUSTOMER --------------------
+// ═══════════════════════════════════════════════════════════════════════════════
+// SECTION 9: CUSTOMER MANAGEMENT
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Find a customer by display name in QuickBooks
+ * @param {string} displayName - Customer display name
+ * @param {Object} tokens - OAuth tokens
+ * @returns {Promise<Object|null>} Customer object or null
+ */
 async function findCustomerByName(displayName, tokens) {
   const data = await qboQuery(tokens, `select * from Customer where DisplayName='${displayName.replace(/'/g, "\\'")}'`);
   return data.QueryResponse.Customer?.[0] || null;
 }
 
-// -------------------- ROUTES --------------------
+// ═══════════════════════════════════════════════════════════════════════════════
+// SECTION 10: API ROUTES
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Health check endpoint
+ * Returns server status and configuration info
+ */
 app.get("/health", (_req, res) => {
   res.json({
     ok: true,
@@ -317,6 +732,10 @@ app.get("/health", (_req, res) => {
   });
 });
 
+/**
+ * OAuth authorization page
+ * Displays link to authorize with QuickBooks
+ */
 app.get("/auth", (_req, res) => {
   try {
     const url = buildAuthUrl();
@@ -330,6 +749,10 @@ app.get("/auth", (_req, res) => {
   }
 });
 
+/**
+ * OAuth callback handler
+ * Exchanges authorization code for tokens and stores them
+ */
 app.get("/callback", async (req, res) => {
   const { code, realmId } = req.query;
   if (!code || !realmId)
@@ -367,6 +790,10 @@ app.get("/callback", async (req, res) => {
   }
 });
 
+/**
+ * Check token status
+ * Returns whether user is authenticated with QuickBooks
+ */
 app.get("/check-token", (_req, res) => {
   const loggedIn = fs.existsSync(TOKEN_PATH);
   try {
@@ -376,33 +803,47 @@ app.get("/check-token", (_req, res) => {
   }
 });
 
+/**
+ * Main payment processing endpoint
+ * Creates a sales receipt in QuickBooks with tax-inclusive calculations
+ * 
+ * Required fields: name, amount, date
+ * Optional fields: email, phone, address, customerNumber, receiptNumber,
+ *                  room, checkin, checkout, notes, method, taxCode, taxAgency
+ */
 app.post("/payment-to-quickbooks", async (req, res) => {
   try {
-    const {
-      name,
-      email,
-      phone,
-      address,
-      customerNumber,
-      amount, // gross (tax-inclusive) entered by user
-      receiptNumber,
-      date,
-      room,
-      checkin,
-      checkout,
-      notes,
-      taxCode,
-      taxAgency,
-    } = req.body;
+    // Extract and sanitize all inputs
+    const rawBody = req.body || {};
+    
+    const name = sanitizeString(rawBody.name, 200);
+    const email = sanitizeEmail(rawBody.email);
+    const phone = sanitizePhone(rawBody.phone);
+    const address = sanitizeString(rawBody.address, 500);
+    const customerNumber = sanitizeString(rawBody.customerNumber, 50);
+    const amount = sanitizeAmount(rawBody.amount);
+    const receiptNumber = sanitizeString(rawBody.receiptNumber, 50);
+    const date = sanitizeDate(rawBody.date);
+    const room = sanitizeString(rawBody.room, 20);
+    const checkin = sanitizeDate(rawBody.checkin);
+    const checkout = sanitizeDate(rawBody.checkout);
+    const notes = sanitizeString(rawBody.notes, 1000);
+    const method = sanitizeString(rawBody.method, 50);
+    const taxCode = sanitizeString(rawBody.taxCode, 50);
+    const taxAgency = sanitizeString(rawBody.taxAgency, 100);
 
-    if (!name || amount === undefined || amount === null || !date) {
-      return res.status(400).json({ error: "Missing fields: name, amount, and date are required" });
+    // Validate required fields
+    if (!name) {
+      return res.status(400).json({ error: "Name is required" });
+    }
+    if (amount === null || amount <= 0) {
+      return res.status(400).json({ error: "Valid amount is required" });
+    }
+    if (!date) {
+      return res.status(400).json({ error: "Valid date is required" });
     }
 
-    const grossAmount = parseFloat(amount);
-    if (isNaN(grossAmount) || grossAmount <= 0) {
-      return res.status(400).json({ error: "Invalid amount" });
-    }
+    const grossAmount = amount;
 
     const tokens = await getAccessToken();
     const itemRef = await ensureItemRef(tokens);
@@ -467,6 +908,7 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       `Room: ${room || "-"}`,
       `Check-in: ${checkin || "-"}`,
       `Check-out: ${checkout || "-"}`,
+      `Payment: ${method ? method.charAt(0).toUpperCase() + method.slice(1) : "N/A"}`,
       `Includes VAT @ ${combinedRate.toFixed(2)}% on EC$${netAmount.toFixed(2)} = EC$${taxAmount.toFixed(2)}`
     ].join(" | ");
 
@@ -545,22 +987,39 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       netCalculated: netAmount.toFixed(2),
       taxCalculated: taxAmount.toFixed(2),
       taxRatePercent: combinedRate.toFixed(4),
-      mode: "TaxInclusive",
-      storedReceipt: fetched,
+      mode: "TaxInclusive"
+      // Note: storedReceipt removed to reduce response size and potential data exposure
     });
   } catch (err) {
-    log("QuickBooks Error:", err.response?.data || err);
+    // Log full error internally but don't expose details to client
+    log("QuickBooks Error:", err.response?.data || err.message || err);
+    
+    // Determine appropriate user-facing error message
+    let userMessage = "Failed to process payment. Please try again.";
+    const errStr = JSON.stringify(err.response?.data || err.message || '');
+    
+    if (errStr.includes('invalid_grant') || errStr.includes('Token')) {
+      userMessage = "Authentication expired. Please re-authorize QuickBooks.";
+    } else if (errStr.includes('Duplicate') || errStr.includes('DocNumber')) {
+      userMessage = "Receipt number already exists. A new one will be generated.";
+    } else if (errStr.includes('Customer')) {
+      userMessage = "Error with customer record. Please check customer details.";
+    }
+    
     res.status(500).json({
-      error: "Failed to push payment",
-      details: err.response?.data || String(err),
+      error: userMessage
     });
   }
 });
 
-// -------------------- START --------------------
+// ═══════════════════════════════════════════════════════════════════════════════
+// SECTION 11: SERVER STARTUP
+// ═══════════════════════════════════════════════════════════════════════════════
+
 const PORT = process.env.PORT || 3000;
+
 app.listen(PORT, () => {
-  log(`🚀 Server running on port ${PORT}`);
+  log(`🚀 Server running on port ${PORT} in ${ENV} mode`);
   try {
     log("Authorize URL:", buildAuthUrl());
   } catch {}
