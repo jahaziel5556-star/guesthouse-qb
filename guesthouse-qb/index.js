@@ -7,7 +7,7 @@
  *              Handles OAuth authentication, sales receipts, and customer sync.
  * 
  * @version 2.0.0
- * @author Jahaziel
+ * @author Glimbaro Guest House Development Team
  * 
  * TABLE OF CONTENTS:
  * ──────────────────────────────────────────────────────────────────────────────
@@ -73,6 +73,12 @@ function rateLimit(req, res, next) {
   
   record.count++;
   if (record.count > RATE_LIMIT_MAX) {
+    // Include CORS headers for allowed origins only (so frontend can read error)
+    const origin = req.headers.origin;
+    if (origin && ALLOWED_ORIGINS.includes(origin)) {
+      res.header('Access-Control-Allow-Origin', origin);
+      res.header('Access-Control-Allow-Credentials', 'true');
+    }
     return res.status(429).json({ error: 'Too many requests. Please try again later.' });
   }
   
@@ -225,6 +231,12 @@ function ipBlockingMiddleware(req, res, next) {
   
   if (blockedIPs.has(ip)) {
     log(`[SECURITY] Blocked request from banned IP: ${ip}`);
+    // Include CORS headers for allowed origins only (so frontend can read error)
+    const origin = req.headers.origin;
+    if (origin && ALLOWED_ORIGINS.includes(origin)) {
+      res.header('Access-Control-Allow-Origin', origin);
+      res.header('Access-Control-Allow-Credentials', 'true');
+    }
     return res.status(403).json({ error: 'Access denied' });
   }
   
@@ -1024,4 +1036,3 @@ app.listen(PORT, () => {
     log("Authorize URL:", buildAuthUrl());
   } catch {}
 });
-
