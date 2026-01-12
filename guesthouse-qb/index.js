@@ -1010,18 +1010,20 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       const detail = err.response?.data;
       const msg = JSON.stringify(detail || err);
       if (payload.DocNumber && /DocNumber|Duplicate|duplicate/i.test(msg)) {
-        try {
-          // Generate a unique DocNumber with timestamp suffix instead of omitting
-          const uniqueDocNumber = receiptNumber 
-            ? `${receiptNumber}-${Date.now().toString(36)}` 
-            : `AUTO-${Date.now()}`;
-          const retryPayload = { ...baseReceipt, DocNumber: String(uniqueDocNumber) };
-          log(`Duplicate DocNumber detected, retrying with: ${uniqueDocNumber}`);
-          createResp = await createSalesReceipt(retryPayload);
-        } catch (retryErr) {
-          log("Retry with unique DocNumber failed:", retryErr.response?.data || retryErr);
-          throw retryErr;
-        }
+        // Log the duplicate but don't modify the receipt number
+        log(`Duplicate DocNumber detected for: ${payload.DocNumber} - this may already exist in QuickBooks`);
+        // Return success with a note that it may already exist
+        return res.json({
+          success: true,
+          receiptId: 'existing',
+          docNumber: payload.DocNumber,
+          grossEntered: grossAmount.toFixed(2),
+          netCalculated: netAmount.toFixed(2),
+          taxCalculated: taxAmount.toFixed(2),
+          taxRatePercent: combinedRate.toFixed(4),
+          mode: "TaxInclusive",
+          note: "Receipt may already exist in QuickBooks"
+        });
       } else {
         throw err;
       }
