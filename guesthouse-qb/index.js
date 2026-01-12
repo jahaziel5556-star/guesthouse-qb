@@ -882,6 +882,9 @@ app.post("/payment-to-quickbooks", async (req, res) => {
     const taxCode = sanitizeString(rawBody.taxCode, 50);
     const taxAgency = sanitizeString(rawBody.taxAgency, 100);
 
+    // Log receipt number for debugging
+    log(`QuickBooks payment request - Name: ${name}, Amount: ${amount}, Receipt#: ${receiptNumber || 'NOT PROVIDED'}`);
+
     // Validate required fields
     if (!name) {
       return res.status(400).json({ error: "Name is required" });
@@ -991,7 +994,9 @@ app.post("/payment-to-quickbooks", async (req, res) => {
     };
 
     let payload = { ...baseReceipt };
-    if (receiptNumber) payload.DocNumber = String(receiptNumber);
+    // Always include DocNumber - use receiptNumber or generate a unique one
+    const docNumber = receiptNumber || `AUTO-${Date.now()}`;
+    payload.DocNumber = String(docNumber);
 
     const salesUrl = `${API_BASE}${tokens.realmId}/salesreceipt`;
     async function createSalesReceipt(body) {
@@ -1006,10 +1011,15 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       const msg = JSON.stringify(detail || err);
       if (payload.DocNumber && /DocNumber|Duplicate|duplicate/i.test(msg)) {
         try {
-          const retryPayload = { ...baseReceipt }; // without DocNumber
+          // Generate a unique DocNumber with timestamp suffix instead of omitting
+          const uniqueDocNumber = receiptNumber 
+            ? `${receiptNumber}-${Date.now().toString(36)}` 
+            : `AUTO-${Date.now()}`;
+          const retryPayload = { ...baseReceipt, DocNumber: String(uniqueDocNumber) };
+          log(`Duplicate DocNumber detected, retrying with: ${uniqueDocNumber}`);
           createResp = await createSalesReceipt(retryPayload);
         } catch (retryErr) {
-          log("Retry without DocNumber failed:", retryErr.response?.data || retryErr);
+          log("Retry with unique DocNumber failed:", retryErr.response?.data || retryErr);
           throw retryErr;
         }
       } else {
@@ -1018,19 +1028,22 @@ app.post("/payment-to-quickbooks", async (req, res) => {
     }
 
     const receiptId = createResp.data.SalesReceipt.Id;
+    const finalDocNumber = createResp.data.SalesReceipt.DocNumber || 'N/A';
 
     // Note: Removed fetch after create to reduce QuickBooks API calls
     // The create response already contains the receipt data we need
+    
+    log(`QuickBooks receipt created - ID: ${receiptId}, DocNumber: ${finalDocNumber}`);
 
     res.json({
       success: true,
       receiptId,
+      docNumber: finalDocNumber,
       grossEntered: grossAmount.toFixed(2),
       netCalculated: netAmount.toFixed(2),
       taxCalculated: taxAmount.toFixed(2),
       taxRatePercent: combinedRate.toFixed(4),
       mode: "TaxInclusive"
-      // Note: storedReceipt removed to reduce response size and potential data exposure
     });
   } catch (err) {
     // Log full error internally but don't expose details to client
@@ -1066,3 +1079,4 @@ app.listen(PORT, () => {
     log("Authorize URL:", buildAuthUrl());
   } catch {}
 });
+
