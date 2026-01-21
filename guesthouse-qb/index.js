@@ -384,6 +384,18 @@ const qbCache = {
 /** Default item name for sales receipts */
 const DEFAULT_ITEM_NAME = process.env.ITEM_NAME || "Accommodation";
 
+/** 
+ * Item Reference ID for Sales - Guest House Accommodation
+ * This ensures sales go to the correct income account in reports
+ */
+const ITEM_REF_ID = process.env.ITEM_REF_ID || "6";
+
+/** 
+ * Deposit Account ID for 003-Undeposited Funds Clearing
+ * This is where sales receipt funds are deposited
+ */
+const DEPOSIT_ACCOUNT_ID = process.env.DEPOSIT_ACCOUNT_ID || "117";
+
 /** Whether to auto-create items if not found */
 const ALLOW_ITEM_CREATE =
   (process.env.ALLOW_ITEM_CREATE || "true").toLowerCase() === "true";
@@ -571,9 +583,9 @@ async function findAnyIncomeAccount(tokens) {
  * @throws {Error} If item not found and creation not allowed
  */
 async function ensureItemRef(tokens) {
-  if (process.env.ITEM_REF_ID) {
-    return { value: String(process.env.ITEM_REF_ID), name: DEFAULT_ITEM_NAME };
-  }
+  // Always use the configured ITEM_REF_ID (default: 6 for Sales - Guest House Accommodation)
+  // This ensures sales receipts are categorized correctly in P&L reports
+  return { value: String(ITEM_REF_ID), name: DEFAULT_ITEM_NAME };
   
   // Return cached item if still valid
   if (qbCache.itemRef && Date.now() < qbCache.itemRefExpiry) {
@@ -775,11 +787,61 @@ app.get("/health", (_req, res) => {
     env: ENV,
     allowedOrigins: ALLOWED_ORIGINS,
     itemName: DEFAULT_ITEM_NAME,
+    itemRefId: ITEM_REF_ID,
+    depositAccountId: DEPOSIT_ACCOUNT_ID,
     allowItemCreate: ALLOW_ITEM_CREATE,
     taxCodeProvided: RAW_TAX_CODE || null,
     taxAgencyProvided: RAW_TAX_AGENCY || null,
     fallbackTaxPercent: FALLBACK_TAX_PERCENT,
   });
+});
+
+/**
+ * Debug endpoint to list all QuickBooks accounts
+ * Use this to find the correct Account ID for DepositToAccountRef
+ */
+app.get("/debug/accounts", async (_req, res) => {
+  try {
+    const tokens = await getAccessToken();
+    const data = await qboQuery(tokens, "SELECT * FROM Account WHERE AccountType IN ('Bank', 'Other Current Asset') MAXRESULTS 100");
+    const accounts = data.QueryResponse.Account || [];
+    res.json({
+      message: "Find your '003-Undeposited Funds Clearing' account and note its Id",
+      accounts: accounts.map(a => ({
+        id: a.Id,
+        name: a.Name,
+        fullyQualifiedName: a.FullyQualifiedName,
+        accountType: a.AccountType,
+        accountSubType: a.AccountSubType
+      }))
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Debug endpoint to list all QuickBooks items
+ * Use this to verify the Item ID for Sales - Guest House Accommodation
+ */
+app.get("/debug/items", async (_req, res) => {
+  try {
+    const tokens = await getAccessToken();
+    const data = await qboQuery(tokens, "SELECT * FROM Item WHERE Type = 'Service' MAXRESULTS 100");
+    const items = data.QueryResponse.Item || [];
+    res.json({
+      message: "Verify Item ID 6 is 'Sales - Guest House Accommodation'",
+      currentItemRefId: ITEM_REF_ID,
+      items: items.map(i => ({
+        id: i.Id,
+        name: i.Name,
+        type: i.Type,
+        incomeAccountRef: i.IncomeAccountRef
+      }))
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 /**
@@ -970,11 +1032,13 @@ app.post("/payment-to-quickbooks", async (req, res) => {
     // - Provide TaxInclusiveAmt with gross
     // - GlobalTaxCalculation: TaxInclusive
     // - Provide TotalTax so QBO doesn't add on top
+    // - DepositToAccountRef: Deposit to 003-Undeposited Funds Clearing
     const baseReceipt = {
       CustomerRef: { value: customerId },
       TxnDate: date,
       PrivateNote: notes || "",
       GlobalTaxCalculation: "TaxInclusive",
+      DepositToAccountRef: { value: DEPOSIT_ACCOUNT_ID },  // 003-Undeposited Funds Clearing
       TxnTaxDetail: {
         TxnTaxCodeRef: { value: taxCodeRef.value },
         TotalTax: taxAmount,
@@ -1081,4 +1145,5 @@ app.listen(PORT, () => {
     log("Authorize URL:", buildAuthUrl());
   } catch {}
 });
+
 
