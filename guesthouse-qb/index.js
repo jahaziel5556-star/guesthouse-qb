@@ -382,7 +382,7 @@ const qbCache = {
 };
 
 /** Default item name for sales receipts */
-const DEFAULT_ITEM_NAME = process.env.ITEM_NAME || "Accommodation";
+const DEFAULT_ITEM_NAME = process.env.ITEM_NAME || "Guest House Accommodation - Single Bed";
 
 /** 
  * Item Reference ID for Sales - Guest House Accommodation
@@ -394,7 +394,7 @@ const ITEM_REF_ID = process.env.ITEM_REF_ID || "6";
  * Deposit Account ID for 003-Undeposited Funds Clearing
  * This is where sales receipt funds are deposited
  */
-const DEPOSIT_ACCOUNT_ID = process.env.DEPOSIT_ACCOUNT_ID || "117";
+const DEPOSIT_ACCOUNT_ID = process.env.DEPOSIT_ACCOUNT_ID || "28";
 
 /** Whether to auto-create items if not found */
 const ALLOW_ITEM_CREATE =
@@ -585,49 +585,8 @@ async function findAnyIncomeAccount(tokens) {
 async function ensureItemRef(tokens) {
   // Always use the configured ITEM_REF_ID (default: 6 for Sales - Guest House Accommodation)
   // This ensures sales receipts are categorized correctly in P&L reports
+  log(`Using Item ID: ${ITEM_REF_ID} for sales receipts`);
   return { value: String(ITEM_REF_ID), name: DEFAULT_ITEM_NAME };
-  
-  // Return cached item if still valid
-  if (qbCache.itemRef && Date.now() < qbCache.itemRefExpiry) {
-    log("Using cached itemRef");
-    return qbCache.itemRef;
-  }
-  
-  let item = await findItemByName(tokens, DEFAULT_ITEM_NAME);
-  if (item) {
-    qbCache.itemRef = { value: item.Id, name: item.Name };
-    qbCache.itemRefExpiry = Date.now() + qbCache.CACHE_TTL;
-    return qbCache.itemRef;
-  }
-
-  if (!ALLOW_ITEM_CREATE) {
-    throw new Error(`Item '${DEFAULT_ITEM_NAME}' not found and ALLOW_ITEM_CREATE=false`);
-  }
-
-  const incomeAccount = await findAnyIncomeAccount(tokens);
-  if (!incomeAccount) throw new Error("No Income account found to attach new Item.");
-
-  const resp = await axios.post(
-    `${API_BASE}${tokens.realmId}/item`,
-    {
-      Name: DEFAULT_ITEM_NAME,
-      Type: "Service",
-      IncomeAccountRef: { value: incomeAccount.Id, name: incomeAccount.Name },
-      TrackQtyOnHand: false,
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${tokens.access_token}`,
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-    }
-  );
-  item = resp.data.Item;
-  // Cache the newly created item
-  qbCache.itemRef = { value: item.Id, name: item.Name };
-  qbCache.itemRefExpiry = Date.now() + qbCache.CACHE_TTL;
-  return qbCache.itemRef;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1112,12 +1071,20 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       mode: "TaxInclusive"
     });
   } catch (err) {
-    // Log full error internally but don't expose details to client
-    log("QuickBooks Error:", err.response?.data || err.message || err);
+    // Log full error with deep inspection to see nested objects
+    const errorData = err.response?.data;
+    log("QuickBooks Error (full):", JSON.stringify(errorData, null, 2));
+    
+    // Log specific Fault details if present
+    if (errorData?.Fault?.Error) {
+      errorData.Fault.Error.forEach((e, i) => {
+        log(`QuickBooks Fault Error ${i + 1}:`, JSON.stringify(e, null, 2));
+      });
+    }
     
     // Determine appropriate user-facing error message
     let userMessage = "Failed to process payment. Please try again.";
-    const errStr = JSON.stringify(err.response?.data || err.message || '');
+    const errStr = JSON.stringify(errorData || err.message || '');
     
     if (errStr.includes('invalid_grant') || errStr.includes('Token')) {
       userMessage = "Authentication expired. Please re-authorize QuickBooks.";
@@ -1125,10 +1092,13 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       userMessage = "Receipt number already exists. A new one will be generated.";
     } else if (errStr.includes('Customer')) {
       userMessage = "Error with customer record. Please check customer details.";
+    } else if (errStr.includes('Invalid Reference Id') || errStr.includes('ItemRef') || errStr.includes('DepositToAccountRef')) {
+      userMessage = "Invalid item or account reference. Check ITEM_REF_ID and DEPOSIT_ACCOUNT_ID configuration.";
     }
     
     res.status(500).json({
-      error: userMessage
+      error: userMessage,
+      debug: errorData?.Fault?.Error?.[0]?.Detail || null
     });
   }
 });
