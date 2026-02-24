@@ -2784,7 +2784,9 @@ if (summaryBtn) {
           voided: false,
           unvoidedAt: new Date().toISOString(),
           unvoidedBy: currentEmployee?.uid || 'unknown',
-          unvoidedByName: currentEmployee?.displayName || currentEmployee?.name || 'Unknown'
+          unvoidedByName: currentEmployee?.displayName || currentEmployee?.name || 'Unknown',
+          qbSyncStatus: 'pending',
+          qbSyncNote: 'Unvoided — re-queued for QB sync'
         });
 
         // Recalculate payment status (now include this payment again)
