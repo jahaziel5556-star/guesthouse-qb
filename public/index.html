@@ -45,10 +45,9 @@
     connect-src 'self' https://*.firebaseio.com https://*.googleapis.com https://guesthouse-curl.onrender.com https://www.gstatic.com https://cdn.jsdelivr.net;
     base-uri 'self';
     form-action 'self';
-    frame-ancestors 'none';
   ">
+  <!-- Note: frame-ancestors and X-Frame-Options only work as HTTP headers (set in backend index.js) -->
   <meta http-equiv="X-Content-Type-Options" content="nosniff">
-  <meta http-equiv="X-Frame-Options" content="DENY">
   <meta http-equiv="X-XSS-Protection" content="1; mode=block">
   <meta name="referrer" content="strict-origin-when-cross-origin">
   
@@ -3327,14 +3326,14 @@
         In-House Guests
       </h3>
       <p style="margin:0 0 16px; font-size:0.85em; color:var(--text-muted);">
-        Select a guest to extend their stay
+        Guests whose checkout is today or yesterday
       </p>
       <div id="inHouseGuestsList" style="display:flex; flex-direction:column; gap:8px; max-height:60vh; overflow-y:auto;">
         <!-- Populated dynamically -->
       </div>
       <div id="inHouseGuestsEmpty" style="display:none; text-align:center; padding:32px 16px; color:var(--text-muted);">
         <span class="material-icons" style="font-size:48px; opacity:0.4; display:block; margin-bottom:8px;">bed</span>
-        No in-house guests at this time
+        No guests eligible for extension right now
       </div>
     </div>
   </div>
@@ -3588,20 +3587,6 @@
       <div class="modal-footer">
         <button id="toggleMaintenanceBtn" class="btn btn-primary"></button>
         <button id="cancelMaintenanceBtn" class="btn btn-secondary">Cancel</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- 🏠 Room History Modal -->
-  <div id="roomHistoryModal" class="modal">
-    <div class="modal-content modal-lg">
-      <span class="close" id="closeRoomHistoryModalBtn">&times;</span>
-      <h3>🏠 Room <span id="roomHistoryRoomNumber"></span> History</h3>
-      <div id="roomHistoryContent" class="results-container">
-        <!-- JS will populate -->
-      </div>
-      <div class="modal-footer">
-        <button id="closeRoomHistoryBtn" class="btn btn-secondary">Close</button>
       </div>
     </div>
   </div>

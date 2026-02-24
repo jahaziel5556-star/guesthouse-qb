@@ -40,12 +40,11 @@
     font-src 'self' https://fonts.gstatic.com;
     img-src 'self' data: https:;
     connect-src 'self' https://*.firebaseio.com https://*.googleapis.com https://identitytoolkit.googleapis.com;
-    frame-ancestors 'none';
     base-uri 'self';
     form-action 'self';
   ">
+  <!-- Note: frame-ancestors and X-Frame-Options only work as HTTP headers (set in backend index.js) -->
   <meta http-equiv="X-Content-Type-Options" content="nosniff">
-  <meta http-equiv="X-Frame-Options" content="DENY">
   <meta http-equiv="X-XSS-Protection" content="1; mode=block">
   <meta name="referrer" content="strict-origin-when-cross-origin">
   

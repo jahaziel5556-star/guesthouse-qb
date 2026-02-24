@@ -5842,102 +5842,15 @@ function showReservationHistory(reservation) {
   historyOverlay.onclick = (e) => { if (e.target === historyOverlay) historyOverlay.remove(); };
 }
 
+/**
+ * Legacy showRoomHistory - redirects to new room history modal
+ * Opens the room selector modal and auto-selects the given room
+ */
 async function showRoomHistory(roomNumber) {
-  const modal = document.getElementById('roomHistoryModal');
-  const content = document.getElementById('roomHistoryContent');
-  const roomNumSpan = document.getElementById('roomHistoryRoomNumber');
-  
-  if (!modal || !content) {
-    alert('Room history modal not found.');
-    return;
+  openRoomHistoryModal();
+  if (roomNumber) {
+    loadRoomHistory(roomNumber);
   }
-  
-  roomNumSpan.textContent = roomNumber;
-  content.innerHTML = '<p>Loading...</p>';
-  modal.style.display = 'block';
-  
-  // Get all reservations for this room, sorted by check-in date (newest first)
-  const reservations = window._reservationsCache || [];
-  const roomReservations = reservations
-    .filter(r => r.roomNumber === roomNumber)
-    .sort((a, b) => {
-      // Sort by arrival date descending (newest first)
-      const dateA = new Date(a.arrivalDate || '1970-01-01');
-      const dateB = new Date(b.arrivalDate || '1970-01-01');
-      return dateB - dateA;
-    });
-  
-  if (roomReservations.length === 0) {
-    content.innerHTML = '<p style="text-align:center;color:#666;">No reservation history for this room.</p>';
-  } else {
-    const allPayments = window._allPaymentsCache || [];
-    
-    let html = `<p style="margin-bottom:12px;font-weight:600;">Total Reservations: ${roomReservations.length}</p>`;
-    html += '<table style="width:100%;border-collapse:collapse;font-size:14px;">';
-    html += `<thead><tr style="background:#f1f5fb;">
-      <th style="padding:8px;text-align:left;border-bottom:1px solid #ddd;">Guest</th>
-      <th style="padding:8px;text-align:left;border-bottom:1px solid #ddd;">Check-In</th>
-      <th style="padding:8px;text-align:left;border-bottom:1px solid #ddd;">Check-Out</th>
-      <th style="padding:8px;text-align:left;border-bottom:1px solid #ddd;">Status</th>
-      <th style="padding:8px;text-align:left;border-bottom:1px solid #ddd;">Payment</th>
-    </tr></thead><tbody>`;
-    
-    for (const res of roomReservations) {
-      const customer = customers.find(c => c.id === res.customerId) || {};
-      // Filter out voided payments
-      const resPayments = allPayments.filter(p => p.reservationId === res.id && !p.voided);
-      const totalPaid = resPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-      const lastPayment = resPayments.sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''))[0];
-      const paymentDate = lastPayment ? formatDateDMY(lastPayment.timestamp) : 'N/A';
-      
-      let checkStatus = '';
-      if (res.checkedOut) {
-        checkStatus = '<span style="color:#6b7280;">✓ Out</span>';
-      } else if (res.checkedIn) {
-        checkStatus = '<span style="color:#10b981;">✓ In</span>';
-      } else {
-        checkStatus = '<span style="color:#f59e0b;">Pending</span>';
-      }
-      
-      // Determine if current/past/future reservation
-      const today = getTodayLocal();
-      let rowBg = '';
-      if (res.arrivalDate <= today && res.departureDate > today) {
-        rowBg = 'background:rgba(16, 185, 129, 0.1);'; // Current - light green
-      } else if (res.departureDate <= today) {
-        rowBg = ''; // Past - normal
-      } else {
-        rowBg = 'background:rgba(59, 130, 246, 0.1);'; // Future - light blue
-      }
-      
-      html += `<tr style="border-bottom:1px solid #eee;cursor:pointer;${rowBg}" data-res-id="${res.id}">
-        <td style="padding:8px;">${escapeHTML(customer.name || 'Unknown')}</td>
-        <td style="padding:8px;">${res.arrivalDate || 'N/A'}</td>
-        <td style="padding:8px;">${res.departureDate || 'N/A'}</td>
-        <td style="padding:8px;">${checkStatus}</td>
-        <td style="padding:8px;">$${totalPaid.toFixed(2)}</td>
-      </tr>`;
-    }
-    
-    html += '</tbody></table>';
-    content.innerHTML = html;
-    
-    // Add click handlers to rows
-    content.querySelectorAll('tr[data-res-id]').forEach(row => {
-      row.addEventListener('click', () => {
-        const resId = row.getAttribute('data-res-id');
-        const res = roomReservations.find(r => r.id === resId);
-        if (res) {
-          modal.style.display = 'none';
-          showEditDeletePopup(res);
-        }
-      });
-    });
-  }
-  
-  // Close handlers
-  document.getElementById('closeRoomHistoryModalBtn').onclick = () => modal.style.display = 'none';
-  document.getElementById('closeRoomHistoryBtn').onclick = () => modal.style.display = 'none';
 }
 
 window.showRoomHistory = showRoomHistory;
@@ -8819,7 +8732,8 @@ function showReceiptDetailModal(payment, reservation) {
 }
 
 /**
- * Shows a modal listing all in-house guests (checked in, not checked out)
+ * Shows a modal listing in-house guests eligible for stay extension
+ * Only shows guests whose departure date is today or yesterday (within 1 day)
  * Clicking a guest opens the extend reservation modal for that guest
  */
 async function showInHouseGuestsForExtend() {
@@ -8828,7 +8742,7 @@ async function showInHouseGuestsForExtend() {
   if (!listContainer || !emptyContainer) return;
 
   // Show loading state
-  listContainer.innerHTML = '<div style="text-align:center; padding:24px; color:var(--text-muted);"><span class="material-icons" style="font-size:32px; animation: spin 1s linear infinite;">hourglass_empty</span><p>Loading in-house guests...</p></div>';
+  listContainer.innerHTML = '<div style="text-align:center; padding:24px; color:var(--text-muted);"><span class="material-icons" style="font-size:32px; animation: spin 1s linear infinite;">hourglass_empty</span><p>Loading eligible guests...</p></div>';
   emptyContainer.style.display = "none";
   ModalManager.open('inHouseGuestsModal');
 
@@ -8845,11 +8759,21 @@ async function showInHouseGuestsForExtend() {
     }
   }
 
-  // Filter: checked in AND not checked out
+  // Calculate date boundaries: today and yesterday
+  const today = getTodayLocal(); // YYYY-MM-DD
+  const yesterdayDate = new Date();
+  yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+  const yesterday = yesterdayDate.toISOString().split('T')[0]; // YYYY-MM-DD
+
+  // Filter: checked in, not checked out, AND departure date is today or yesterday
   const inHouseGuests = reservations.filter(r => {
     const isCheckedIn = r.checkedIn || !!r.actualCheckInTime;
     const isCheckedOut = !!r.checkedOut;
-    return isCheckedIn && !isCheckedOut;
+    if (!isCheckedIn || isCheckedOut) return false;
+    
+    // Only show guests whose departure is today or yesterday (eligible for extension)
+    const depDate = r.departureDate || '';
+    return depDate >= yesterday && depDate <= today;
   });
 
   if (inHouseGuests.length === 0) {
@@ -8933,12 +8857,46 @@ async function showInHouseGuestsForExtend() {
   const roomHistoryBtn = document.getElementById("roomHistoryBtn");
   if (roomHistoryBtn) roomHistoryBtn.onclick = () => openRoomHistoryModal();
 
-  const closeRoomHistoryBtn = document.getElementById("closeRoomHistoryBtn");
-  if (closeRoomHistoryBtn) closeRoomHistoryBtn.onclick = () => ModalManager.close('roomHistoryModal');
+  // Close X button for room history modal
+  const closeRoomHistoryXBtn = document.getElementById("closeRoomHistoryBtn");
+  if (closeRoomHistoryXBtn) closeRoomHistoryXBtn.onclick = () => ModalManager.close('roomHistoryModal');
 
   const roomHistoryBackBtn = document.getElementById("roomHistoryBackBtn");
   if (roomHistoryBackBtn) roomHistoryBackBtn.onclick = () => showRoomSelector();
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MISSING CLOSE BUTTON HANDLERS
+// ═══════════════════════════════════════════════════════════════════════════
+{
+  // Receipt Detail Modal X button
+  const closeReceiptDetailBtn = document.getElementById("closeReceiptDetailBtn");
+  if (closeReceiptDetailBtn) closeReceiptDetailBtn.onclick = () => ModalManager.close('receiptDetailModal');
+
+  // ID Upload Modal X button
+  const closeIdUploadBtn = document.getElementById("closeIdUploadBtn");
+  if (closeIdUploadBtn) closeIdUploadBtn.onclick = () => ModalManager.close('idUploadModal');
+
+  // ID Crop Modal X button
+  const closeIdCropBtn = document.getElementById("closeIdCropBtn");
+  if (closeIdCropBtn) closeIdCropBtn.onclick = () => ModalManager.close('idCropModal');
+
+  // Email Confirmation Modal (legacy) X and Cancel buttons
+  const closeEmailConfirmationBtn = document.getElementById("closeEmailConfirmationBtn");
+  if (closeEmailConfirmationBtn) closeEmailConfirmationBtn.onclick = () => ModalManager.close('emailConfirmationModal');
+  const cancelEmailConfirmationBtn = document.getElementById("cancelEmailConfirmationBtn");
+  if (cancelEmailConfirmationBtn) cancelEmailConfirmationBtn.onclick = () => ModalManager.close('emailConfirmationModal');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MODAL BACKDROP CLICK-TO-CLOSE (click outside modal content to close)
+// ═══════════════════════════════════════════════════════════════════════════
+document.addEventListener('click', (e) => {
+  // Only handle clicks directly on the modal backdrop (not the content inside)
+  if (e.target.classList.contains('modal') && e.target.style.display === 'block') {
+    ModalManager.close(e.target.id);
+  }
+});
 
 function openRoomHistoryModal() {
   ModalManager.open('roomHistoryModal');
