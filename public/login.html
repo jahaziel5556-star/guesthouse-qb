@@ -1,0 +1,1510 @@
+<!--
+  =============================================================================
+  GLIMBARO GUEST HOUSE - Employee Login Page
+  =============================================================================
+  
+  PURPOSE:
+  - Employee authentication via Firebase Auth (email/password)
+  - New employee registration with invite codes
+  - Password reset functionality
+  
+  SECURITY FEATURES:
+  - Client-side rate limiting (5 attempts, then 60 min lockout)
+  - Password strength meter with requirements
+  - Invite codes required for registration (single-use)
+  - All actions logged to audit_logs collection
+  
+  FLOW:
+  1. Check if already logged in → redirect to index.html
+  2. Show login/register form
+  3. On success → create session → redirect to dashboard
+  
+  =============================================================================
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="robots" content="noindex, nofollow">
+  <title>Employee Login - Glimbaro Guest House</title>
+  
+  <!-- ═══════════════════════════════════════════════════════════════
+       SECURITY HEADERS
+       ═══════════════════════════════════════════════════════════════ -->
+  <!-- Content Security Policy: restricts what resources can load -->
+  <meta http-equiv="Content-Security-Policy" content="
+    default-src 'self';
+    script-src 'self' 'unsafe-inline' https://www.gstatic.com https://www.google.com;
+    style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+    font-src 'self' https://fonts.gstatic.com;
+    img-src 'self' data: https:;
+    connect-src 'self' https://*.firebaseio.com https://*.googleapis.com https://identitytoolkit.googleapis.com;
+    frame-ancestors 'none';
+    base-uri 'self';
+    form-action 'self';
+  ">
+  <meta http-equiv="X-Content-Type-Options" content="nosniff">
+  <meta http-equiv="X-Frame-Options" content="DENY">
+  <meta http-equiv="X-XSS-Protection" content="1; mode=block">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  
+  <!-- ═══════════════════════════════════════════════════════════════
+       RESOURCE HINTS - Speed up external resource loading
+       ═══════════════════════════════════════════════════════════════ -->
+  <!-- DNS prefetch: resolve DNS for domains we'll need -->
+  <link rel="dns-prefetch" href="//fonts.googleapis.com">
+  <link rel="dns-prefetch" href="//fonts.gstatic.com">
+  <link rel="dns-prefetch" href="//www.gstatic.com">
+  <link rel="dns-prefetch" href="//firestore.googleapis.com">
+  
+  <!-- Preconnect: establish early connections to critical origins -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
+  <link rel="preconnect" href="https://identitytoolkit.googleapis.com" crossorigin>
+  
+  <!-- Preload Firebase modules for faster auth -->
+  <link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js">
+  <link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js">
+  <link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js">
+  
+  <!-- ═══════════════════════════════════════════════════════════════
+       EXTERNAL RESOURCES - Fonts & Icons from CDN
+       ═══════════════════════════════════════════════════════════════ -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons&display=swap" rel="stylesheet">
+
+  <style>
+    /*
+     * ═══════════════════════════════════════════════════════════════
+     * CSS VARIABLES - Consistent with index.html
+     * ═══════════════════════════════════════════════════════════════
+     * Using the same variable names across all files for consistency.
+     * Login page uses dark theme by default (no light mode toggle).
+     */
+    :root {
+      /* Background colors */
+      --bg-primary: #0f172a;      /* Main page background */
+      --bg-secondary: #1e293b;    /* Card/container backgrounds */
+      --bg-tertiary: #334155;     /* Nested elements */
+      --bg-card: #334155;         /* Form inputs, cards */
+      
+      /* Text colors */
+      --text-primary: #f8fafc;    /* Main text */
+      --text-secondary: #94a3b8;  /* Labels, descriptions */
+      --text-muted: #64748b;      /* Placeholder, hints */
+      
+      /* Border colors */
+      --border-light: #334155;    /* Subtle borders */
+      --border-medium: #475569;   /* Standard borders */
+      --border-color: #475569;    /* Alias for compatibility */
+      
+      /* Accent colors - same across all pages */
+      --accent-primary: #3b82f6;        /* Blue - primary actions */
+      --accent-primary-hover: #2563eb;  /* Blue hover state */
+      --accent-success: #10b981;        /* Green - success states */
+      --accent-warning: #f59e0b;        /* Orange - warnings */
+      --accent-danger: #ef4444;         /* Red - errors, delete */
+      --accent-info: #06b6d4;           /* Cyan - info messages */
+      
+      /* Shadows */
+      --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+      --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4);
+      --shadow-lg: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+      
+      /* Border radius - consistent with index.html */
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 14px;
+      
+      /* Font */
+      --font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       BASE STYLES - Reset and defaults
+       ═══════════════════════════════════════════════════════════════ */
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      font-family: var(--font-family);
+      background: linear-gradient(135deg, var(--bg-primary) 0%, #1a365d 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      color: var(--text-primary);
+      /* GPU acceleration for smooth animations */
+      -webkit-overflow-scrolling: touch;
+    }
+    
+    /* Reduce motion for users who prefer it (accessibility) */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        transition-duration: 0.01ms !important;
+      }
+      html {
+        scroll-behavior: auto;
+      }
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       LOGIN CONTAINER - Main card holding the form
+       ═══════════════════════════════════════════════════════════════ */
+    .login-container {
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+      max-width: 420px;
+      background: var(--bg-secondary);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-lg);
+      overflow: hidden;
+      /* GPU acceleration */
+      transform: translateZ(0);
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       AUTH CHECKING OVERLAY - Shown while verifying existing session
+       ═══════════════════════════════════════════════════════════════ */
+    .auth-checking-overlay {
+      position: fixed;
+      inset: 0;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      background: linear-gradient(135deg, var(--bg-primary) 0%, #1a365d 100%);
+    }
+
+    .auth-checking-overlay.show {
+      display: flex;
+    }
+
+    .auth-checking-spinner {
+      width: 48px;
+      height: 48px;
+      border: 4px solid rgba(255,255,255,0.1);
+      border-top-color: var(--accent-primary);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .auth-checking-text {
+      margin-top: 16px;
+      color: rgba(255,255,255,0.7);
+      font-size: 0.9rem;
+    }
+
+    .login-header {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 40px 32px 24px;
+      background: linear-gradient(135deg, var(--accent-primary) 0%, #1d4ed8 100%);
+      text-align: center;
+    }
+
+    .login-header .logo {
+      width: 72px;
+      height: 72px;
+      background: rgba(255,255,255,0.15);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 16px;
+    }
+
+    .login-header .logo .material-icons {
+      font-size: 36px;
+      color: white;
+    }
+
+    .login-header h1 {
+      font-size: 1.5rem;
+      font-weight: 600;
+      color: white;
+      margin-bottom: 4px;
+    }
+
+    .login-header p {
+      font-size: 0.875rem;
+      color: rgba(255,255,255,0.8);
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       TAB NAVIGATION
+       ═══════════════════════════════════════════════════════════════ */
+    .auth-tabs {
+      display: flex;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .auth-tab {
+      flex: 1;
+      padding: 16px;
+      background: transparent;
+      border: none;
+      color: var(--text-secondary);
+      font-size: 0.9rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+      position: relative;
+    }
+
+    .auth-tab:hover {
+      color: var(--text-primary);
+      background: rgba(255,255,255,0.05);
+    }
+
+    .auth-tab.active {
+      color: var(--accent-primary);
+    }
+
+    .auth-tab.active::after {
+      content: '';
+      position: absolute;
+      bottom: -1px;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: var(--accent-primary);
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       FORM STYLES - Input fields, labels, wrappers
+       ═══════════════════════════════════════════════════════════════ */
+    .auth-form {
+      display: none;
+      flex-direction: column;
+      gap: 20px;
+      padding: 32px;
+    }
+
+    .auth-form.active {
+      display: flex;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .form-group label {
+      font-size: 0.85rem;
+      font-weight: 500;
+      color: var(--text-secondary);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .form-group label .material-icons {
+      font-size: 18px;
+    }
+
+    .input-wrapper {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+
+    /* Form input - consistent styling across pages */
+    .form-input {
+      width: 100%;
+      padding: 14px 16px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-medium);
+      border-radius: var(--radius-md);
+      color: var(--text-primary);
+      font-size: 1rem;
+      font-family: var(--font-family);
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .form-input:focus {
+      outline: none;
+      border-color: var(--accent-primary);
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+    }
+
+    .form-input::placeholder {
+      color: var(--text-muted);
+    }
+
+    /* Password visibility toggle button */
+    .toggle-password {
+      position: absolute;
+      right: 12px;
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 4px;
+      transition: color 0.2s;
+    }
+
+    .toggle-password:hover {
+      color: var(--text-secondary);
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       PASSWORD STRENGTH METER
+       ═══════════════════════════════════════════════════════════════ */
+    .password-strength {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .strength-bar {
+      display: flex;
+      gap: 4px;
+      height: 4px;
+    }
+
+    .strength-segment {
+      flex: 1;
+      background: var(--bg-card);
+      border-radius: 2px;
+      transition: background 0.3s;
+    }
+
+    .strength-segment.weak { background: var(--accent-danger); }
+    .strength-segment.fair { background: var(--accent-warning); }
+    .strength-segment.good { background: #84cc16; }
+    .strength-segment.strong { background: var(--accent-success); }
+
+    .strength-text {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    .strength-text.weak { color: var(--accent-danger); }
+    .strength-text.fair { color: var(--accent-warning); }
+    .strength-text.good { color: #84cc16; }
+    .strength-text.strong { color: var(--accent-success); }
+
+    .password-requirements {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 4px;
+    }
+
+    .requirement {
+      font-size: 0.7rem;
+      padding: 4px 8px;
+      background: var(--bg-card);
+      border-radius: 4px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .requirement.met {
+      background: rgba(16, 185, 129, 0.2);
+      color: var(--accent-success);
+    }
+
+    .requirement .material-icons {
+      font-size: 12px;
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       BUTTONS - Consistent with index.html button styles
+       ═══════════════════════════════════════════════════════════════ */
+    .btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 14px 24px;
+      border-radius: var(--radius-md);
+      font-size: 1rem;
+      font-weight: 600;
+      font-family: var(--font-family);
+      cursor: pointer;
+      border: none;
+      /* Optimized transitions */
+      transition: transform 0.15s ease-out, box-shadow 0.15s ease-out, background 0.15s ease-out;
+      /* GPU acceleration */
+      transform: translateZ(0);
+    }
+
+    .btn:active {
+      transform: translateZ(0) scale(0.98);
+    }
+
+    /* Primary button - main action (Sign In, Create Account) */
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent-primary), #2563eb);
+      color: white;
+      box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3);
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      background: linear-gradient(135deg, var(--accent-primary-hover), #1d4ed8);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 8px rgba(59, 130, 246, 0.4);
+    }
+
+    .btn-primary:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    /* Ghost button - secondary action (Forgot Password) */
+    .btn-ghost {
+      background: transparent;
+      color: var(--text-secondary);
+      border: 1px solid var(--border-medium);
+    }
+
+    .btn-ghost:hover {
+      background: rgba(255,255,255,0.05);
+      color: var(--text-primary);
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       ALERTS & MESSAGES
+       ═══════════════════════════════════════════════════════════════ */
+    .alert {
+      display: none;
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 0.875rem;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .alert.show {
+      display: flex;
+    }
+
+    .alert-error {
+      background: rgba(239, 68, 68, 0.15);
+      color: #fca5a5;
+      border: 1px solid rgba(239, 68, 68, 0.3);
+    }
+
+    .alert-success {
+      background: rgba(16, 185, 129, 0.15);
+      color: #6ee7b7;
+      border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+
+    .alert-warning {
+      background: rgba(245, 158, 11, 0.15);
+      color: #fcd34d;
+      border: 1px solid rgba(245, 158, 11, 0.3);
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       RATE LIMIT LOCKOUT
+       ═══════════════════════════════════════════════════════════════ */
+    .lockout-overlay {
+      display: none;
+      position: absolute;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.95);
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 32px;
+      z-index: 100;
+    }
+
+    .lockout-overlay.show {
+      display: flex;
+    }
+
+    .lockout-overlay .material-icons {
+      font-size: 64px;
+      color: var(--accent-danger);
+      margin-bottom: 16px;
+    }
+
+    .lockout-overlay h2 {
+      margin-bottom: 8px;
+    }
+
+    .lockout-timer {
+      font-size: 2rem;
+      font-weight: 700;
+      color: var(--accent-warning);
+      margin: 16px 0;
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       LOADING SPINNER
+       ═══════════════════════════════════════════════════════════════ */
+    .spinner {
+      width: 20px;
+      height: 20px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       INVITE CODE INFO
+       ═══════════════════════════════════════════════════════════════ */
+    .invite-info {
+      background: rgba(59, 130, 246, 0.1);
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      border-radius: 8px;
+      padding: 12px;
+      font-size: 0.8rem;
+      color: var(--text-secondary);
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+    }
+
+    .invite-info .material-icons {
+      color: var(--accent-primary);
+      font-size: 20px;
+      flex-shrink: 0;
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       FOOTER
+       ═══════════════════════════════════════════════════════════════ */
+    .login-footer {
+      padding: 20px 32px;
+      text-align: center;
+      border-top: 1px solid var(--border-color);
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    .login-footer a {
+      color: var(--accent-primary);
+      text-decoration: none;
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       RESPONSIVE
+       ═══════════════════════════════════════════════════════════════ */
+    @media (max-width: 480px) {
+      .login-container {
+        border-radius: 0;
+        max-width: 100%;
+      }
+      
+      .login-header {
+        padding: 30px 24px 20px;
+      }
+      
+      .auth-form {
+        padding: 24px;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Auth checking overlay - shown until we know user isn't already logged in -->
+  <div class="auth-checking-overlay" id="authCheckingOverlay">
+    <div class="auth-checking-spinner"></div>
+    <p class="auth-checking-text">Checking authentication...</p>
+  </div>
+
+  <div class="login-container" id="loginContainer">
+    <!-- Lockout Overlay -->
+    <div class="lockout-overlay" id="lockoutOverlay">
+      <span class="material-icons">lock</span>
+      <h2>Too Many Attempts</h2>
+      <p>For security, login is temporarily disabled.</p>
+      <div class="lockout-timer" id="lockoutTimer">5:00</div>
+      <p style="font-size:0.85rem; color:var(--text-muted);">Please wait before trying again.</p>
+    </div>
+
+    <!-- Header -->
+    <div class="login-header">
+      <div class="logo">
+        <span class="material-icons">hotel</span>
+      </div>
+      <h1>Glimbaro Guest House</h1>
+      <p>Employee Portal</p>
+    </div>
+
+    <!-- Tab Navigation -->
+    <div class="auth-tabs">
+      <button class="auth-tab active" data-tab="login">
+        <span class="material-icons" style="font-size:18px; vertical-align:middle; margin-right:4px;">login</span>
+        Sign In
+      </button>
+      <button class="auth-tab" data-tab="register">
+        <span class="material-icons" style="font-size:18px; vertical-align:middle; margin-right:4px;">person_add</span>
+        Register
+      </button>
+    </div>
+
+    <!-- Login Form -->
+    <form class="auth-form active" id="loginForm">
+      <div id="loginAlert" class="alert"></div>
+
+      <div class="form-group">
+        <label>
+          <span class="material-icons">email</span>
+          Email Address
+        </label>
+        <div class="input-wrapper">
+          <input 
+            type="email" 
+            id="loginEmail" 
+            class="form-input" 
+            placeholder="employee@glimbaro.com"
+            autocomplete="email"
+            required
+          >
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>
+          <span class="material-icons">lock</span>
+          Password
+        </label>
+        <div class="input-wrapper">
+          <input 
+            type="password" 
+            id="loginPassword" 
+            class="form-input" 
+            placeholder="Enter your password"
+            autocomplete="current-password"
+            required
+          >
+          <button type="button" class="toggle-password" data-target="loginPassword">
+            <span class="material-icons">visibility</span>
+          </button>
+        </div>
+      </div>
+
+      <button type="submit" class="btn btn-primary" id="loginBtn">
+        <span class="btn-text">Sign In</span>
+        <span class="spinner" style="display:none;"></span>
+      </button>
+
+      <button type="button" class="btn btn-ghost" id="forgotPasswordBtn">
+        Forgot Password?
+      </button>
+    </form>
+
+    <!-- Registration Form -->
+    <form class="auth-form" id="registerForm">
+      <div id="registerAlert" class="alert"></div>
+
+      <div class="invite-info">
+        <span class="material-icons">info</span>
+        <div>
+          <strong>Invite Code Required</strong><br>
+          Contact your manager to receive an invite code for registration.
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>
+          <span class="material-icons">vpn_key</span>
+          Invite Code
+        </label>
+        <div class="input-wrapper">
+          <input 
+            type="text" 
+            id="inviteCode" 
+            class="form-input" 
+            placeholder="Enter your invite code"
+            autocomplete="off"
+            required
+            style="text-transform: uppercase;"
+          >
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>
+          <span class="material-icons">person</span>
+          Full Name
+        </label>
+        <div class="input-wrapper">
+          <input 
+            type="text" 
+            id="registerName" 
+            class="form-input" 
+            placeholder="Your full name"
+            autocomplete="name"
+            required
+          >
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>
+          <span class="material-icons">email</span>
+          Email Address
+        </label>
+        <div class="input-wrapper">
+          <input 
+            type="email" 
+            id="registerEmail" 
+            class="form-input" 
+            placeholder="your.email@example.com"
+            autocomplete="email"
+            required
+          >
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>
+          <span class="material-icons">lock</span>
+          Password
+        </label>
+        <div class="input-wrapper">
+          <input 
+            type="password" 
+            id="registerPassword" 
+            class="form-input" 
+            placeholder="Create a strong password"
+            autocomplete="new-password"
+            required
+          >
+          <button type="button" class="toggle-password" data-target="registerPassword">
+            <span class="material-icons">visibility</span>
+          </button>
+        </div>
+        
+        <!-- Password Strength Meter -->
+        <div class="password-strength" id="passwordStrength" style="display:none;">
+          <div class="strength-bar">
+            <div class="strength-segment" id="seg1"></div>
+            <div class="strength-segment" id="seg2"></div>
+            <div class="strength-segment" id="seg3"></div>
+            <div class="strength-segment" id="seg4"></div>
+          </div>
+          <div class="strength-text" id="strengthText">Password strength</div>
+          <div class="password-requirements">
+            <span class="requirement" id="reqLength">
+              <span class="material-icons">close</span> 8+ chars
+            </span>
+            <span class="requirement" id="reqUpper">
+              <span class="material-icons">close</span> Uppercase
+            </span>
+            <span class="requirement" id="reqLower">
+              <span class="material-icons">close</span> Lowercase
+            </span>
+            <span class="requirement" id="reqNumber">
+              <span class="material-icons">close</span> Number
+            </span>
+            <span class="requirement" id="reqSpecial">
+              <span class="material-icons">close</span> Special
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>
+          <span class="material-icons">lock</span>
+          Confirm Password
+        </label>
+        <div class="input-wrapper">
+          <input 
+            type="password" 
+            id="confirmPassword" 
+            class="form-input" 
+            placeholder="Confirm your password"
+            autocomplete="new-password"
+            required
+          >
+        </div>
+      </div>
+
+      <button type="submit" class="btn btn-primary" id="registerBtn" disabled>
+        <span class="btn-text">Create Account</span>
+        <span class="spinner" style="display:none;"></span>
+      </button>
+    </form>
+
+    <!-- Footer -->
+    <div class="login-footer">
+      <p>🔒 Secured with Firebase Authentication</p>
+      <p style="margin-top:8px;">© 2026 Glimbaro Guest House</p>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       FIREBASE SDK & APPLICATION LOGIC
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <script type="module">
+    /*
+     * =============================================================================
+     * LOGIN PAGE - Firebase Authentication Logic
+     * =============================================================================
+     * 
+     * This script handles:
+     * - Login with email/password
+     * - Registration with invite code
+     * - Password reset
+     * - Client-side rate limiting
+     * 
+     * SECURITY NOTES:
+     * - Client-side rate limiting is defense-in-depth (Firebase has server-side too)
+     * - Invite codes are single-use and stored in Firestore
+     * - All auth events are logged to audit_logs collection
+     * 
+     * =============================================================================
+     */
+    
+    // ─────────────────────────────────────────────────────────────────────────────
+    // FIREBASE IMPORTS
+    // ─────────────────────────────────────────────────────────────────────────────
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+    import { 
+      getAuth, 
+      signInWithEmailAndPassword,
+      createUserWithEmailAndPassword,
+      sendPasswordResetEmail,
+      updateProfile,
+      onAuthStateChanged
+    } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+    import {
+      getFirestore,
+      collection,
+      doc,
+      getDoc,
+      setDoc,
+      updateDoc,
+      deleteDoc,
+      serverTimestamp,
+      query,
+      where,
+      getDocs
+    } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // FIREBASE CONFIGURATION
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Same project as main app - must match main1.js config exactly
+    const FIREBASE_CONFIG = {
+      apiKey: "AIzaSyCFc_jLIEOQ9iwFeDnjQJTjHYSNQVKwfWo",
+      authDomain: "r-system-33a06.firebaseapp.com",
+      projectId: "r-system-33a06",
+      storageBucket: "r-system-33a06.firebasestorage.app",
+      messagingSenderId: "317536373984",
+      appId: "1:317536373984:web:01c4aa68bf0da885e45485"
+    };
+
+    // Initialize Firebase
+    const app = initializeApp(FIREBASE_CONFIG);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // SECURITY CONFIGURATION
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Client-side rate limiting to slow down brute force attacks
+    // These values should match the security policy in main1.js
+    const SECURITY_CONFIG = {
+      maxLoginAttempts: 5,               // Lock after 5 failed attempts
+      lockoutDurationMs: 60 * 60 * 1000, // 60 minute lockout
+      rateLimitWindowMs: 60 * 1000,      // Track attempts in 1 minute window
+      maxRequestsPerMinute: 3,           // Max requests per window
+      tokenRefreshMs: 30 * 60 * 1000,    // Refresh auth token every 30 min
+      sessionTimeoutMs: 8 * 60 * 60 * 1000 // 8 hour session max
+    };
+
+    // Rate limiting state
+    let loginAttempts = [];
+    let lockoutEndTime = null;
+
+    // ═══════════════════════════════════════════════════════════════
+    // CHECK IF ALREADY AUTHENTICATED (fast check, no blocking)
+    // ═══════════════════════════════════════════════════════════════
+    // If user is already logged in (from previous session), skip straight to dashboard
+    // Don't block UI - show login form immediately, redirect only if valid session found
+    
+    // Quick auth state check - don't block the UI
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      unsubscribe(); // Only need first callback
+      
+      if (user) {
+        try {
+          // Show loading overlay only when we're about to redirect
+          document.getElementById('authCheckingOverlay')?.classList.add('show');
+          
+          // Verify user is an employee
+          const employeeDoc = await getDoc(doc(db, 'employees', user.uid));
+          if (employeeDoc.exists() && employeeDoc.data().active) {
+            // Valid employee - redirect to main app
+            window.location.href = 'index.html';
+            return;
+          } else {
+            // Not a valid employee - sign out
+            await auth.signOut();
+          }
+        } catch (err) {
+          console.error('Error checking employee status:', err);
+          try { await auth.signOut(); } catch (e) {}
+        }
+        
+        // Hide overlay if we didn't redirect
+        document.getElementById('authCheckingOverlay')?.classList.remove('show');
+      }
+    });
+
+    // ═══════════════════════════════════════════════════════════════
+    // TAB SWITCHING
+    // ═══════════════════════════════════════════════════════════════
+    document.querySelectorAll('.auth-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        const targetTab = tab.dataset.tab;
+        
+        // Update tabs
+        document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        
+        // Update forms
+        document.querySelectorAll('.auth-form').forEach(f => f.classList.remove('active'));
+        document.getElementById(targetTab + 'Form').classList.add('active');
+        
+        // Clear alerts
+        hideAlert('loginAlert');
+        hideAlert('registerAlert');
+      });
+    });
+
+    // ═══════════════════════════════════════════════════════════════
+    // PASSWORD VISIBILITY TOGGLE
+    // ═══════════════════════════════════════════════════════════════
+    document.querySelectorAll('.toggle-password').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const targetId = btn.dataset.target;
+        const input = document.getElementById(targetId);
+        const icon = btn.querySelector('.material-icons');
+        
+        if (input.type === 'password') {
+          input.type = 'text';
+          icon.textContent = 'visibility_off';
+        } else {
+          input.type = 'password';
+          icon.textContent = 'visibility';
+        }
+      });
+    });
+
+    // ═══════════════════════════════════════════════════════════════
+    // PASSWORD STRENGTH CHECKER
+    // ═══════════════════════════════════════════════════════════════
+    const passwordInput = document.getElementById('registerPassword');
+    const strengthMeter = document.getElementById('passwordStrength');
+
+    passwordInput.addEventListener('input', () => {
+      const password = passwordInput.value;
+      
+      if (password.length === 0) {
+        strengthMeter.style.display = 'none';
+        updateRegisterButton();
+        return;
+      }
+      
+      strengthMeter.style.display = 'block';
+      const strength = checkPasswordStrength(password);
+      updateStrengthUI(strength);
+      updateRegisterButton();
+    });
+
+    function checkPasswordStrength(password) {
+      const checks = {
+        length: password.length >= 8,
+        upper: /[A-Z]/.test(password),
+        lower: /[a-z]/.test(password),
+        number: /[0-9]/.test(password),
+        special: /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)
+      };
+
+      const passed = Object.values(checks).filter(Boolean).length;
+      
+      let level = 'weak';
+      if (passed >= 5) level = 'strong';
+      else if (passed >= 4) level = 'good';
+      else if (passed >= 3) level = 'fair';
+
+      return { checks, passed, level };
+    }
+
+    function updateStrengthUI(strength) {
+      const segments = ['seg1', 'seg2', 'seg3', 'seg4'];
+      const levels = { weak: 1, fair: 2, good: 3, strong: 4 };
+      const levelNum = levels[strength.level];
+
+      segments.forEach((id, i) => {
+        const seg = document.getElementById(id);
+        seg.className = 'strength-segment';
+        if (i < levelNum) {
+          seg.classList.add(strength.level);
+        }
+      });
+
+      const strengthText = document.getElementById('strengthText');
+      strengthText.textContent = {
+        weak: 'Weak password',
+        fair: 'Fair password',
+        good: 'Good password',
+        strong: 'Strong password'
+      }[strength.level];
+      strengthText.className = 'strength-text ' + strength.level;
+
+      // Update requirement badges
+      updateRequirement('reqLength', strength.checks.length);
+      updateRequirement('reqUpper', strength.checks.upper);
+      updateRequirement('reqLower', strength.checks.lower);
+      updateRequirement('reqNumber', strength.checks.number);
+      updateRequirement('reqSpecial', strength.checks.special);
+    }
+
+    function updateRequirement(id, met) {
+      const el = document.getElementById(id);
+      const icon = el.querySelector('.material-icons');
+      if (met) {
+        el.classList.add('met');
+        icon.textContent = 'check';
+      } else {
+        el.classList.remove('met');
+        icon.textContent = 'close';
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // RATE LIMITING
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Client-side protection: tracks failed attempts, locks out after max failures
+    // This is defense-in-depth - Firebase also has server-side protection
+    
+    function checkRateLimit() {
+      const now = Date.now();
+      
+      // Check if currently locked out
+      if (lockoutEndTime && now < lockoutEndTime) {
+        return false;
+      } else if (lockoutEndTime) {
+        // Lockout has expired - reset
+        lockoutEndTime = null;
+        loginAttempts = [];
+        hideLockout();
+      }
+
+      // Clean old attempts outside the window
+      loginAttempts = loginAttempts.filter(t => now - t < SECURITY_CONFIG.rateLimitWindowMs);
+
+      // Check if exceeded max attempts
+      if (loginAttempts.length >= SECURITY_CONFIG.maxLoginAttempts) {
+        lockoutEndTime = now + SECURITY_CONFIG.lockoutDurationMs;
+        showLockout();
+        return false;
+      }
+
+      return true;
+    }
+
+    function recordLoginAttempt() {
+      loginAttempts.push(Date.now());
+    }
+
+    function showLockout() {
+      const overlay = document.getElementById('lockoutOverlay');
+      overlay.classList.add('show');
+      updateLockoutTimer();
+    }
+
+    function hideLockout() {
+      document.getElementById('lockoutOverlay').classList.remove('show');
+    }
+
+    function updateLockoutTimer() {
+      const timerEl = document.getElementById('lockoutTimer');
+      const interval = setInterval(() => {
+        if (!lockoutEndTime) {
+          clearInterval(interval);
+          return;
+        }
+        
+        const remaining = lockoutEndTime - Date.now();
+        if (remaining <= 0) {
+          lockoutEndTime = null;
+          loginAttempts = [];
+          hideLockout();
+          clearInterval(interval);
+          return;
+        }
+        
+        const mins = Math.floor(remaining / 60000);
+        const secs = Math.floor((remaining % 60000) / 1000);
+        timerEl.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+      }, 1000);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // ALERT HELPERS
+    // ═══════════════════════════════════════════════════════════════
+    function showAlert(id, message, type = 'error') {
+      const alert = document.getElementById(id);
+      alert.className = `alert show alert-${type}`;
+      alert.innerHTML = `<span class="material-icons">${
+        type === 'error' ? 'error' : type === 'success' ? 'check_circle' : 'warning'
+      }</span>${escapeHtml(message)}`;
+    }
+
+    function hideAlert(id) {
+      document.getElementById(id).classList.remove('show');
+    }
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // REGISTER BUTTON STATE
+    // ═══════════════════════════════════════════════════════════════
+    function updateRegisterButton() {
+      const password = document.getElementById('registerPassword').value;
+      const confirm = document.getElementById('confirmPassword').value;
+      const inviteCode = document.getElementById('inviteCode').value;
+      const email = document.getElementById('registerEmail').value;
+      const name = document.getElementById('registerName').value;
+      
+      const strength = checkPasswordStrength(password);
+      const passwordsMatch = password === confirm && password.length > 0;
+      const hasInvite = inviteCode.trim().length >= 6;
+      const hasEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+      const hasName = name.trim().length >= 2;
+      
+      const canRegister = strength.level !== 'weak' && passwordsMatch && hasInvite && hasEmail && hasName;
+      document.getElementById('registerBtn').disabled = !canRegister;
+    }
+
+    // Listen to all register form inputs
+    ['inviteCode', 'registerName', 'registerEmail', 'confirmPassword'].forEach(id => {
+      document.getElementById(id).addEventListener('input', updateRegisterButton);
+    });
+
+    // ═══════════════════════════════════════════════════════════════
+    // LOGIN HANDLER
+    // ═══════════════════════════════════════════════════════════════
+    // Flow: Rate limit check → Firebase sign in → Verify employee doc exists →
+    // Check not deactivated → Update last login → Audit log → Redirect
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      // Rate limit check
+      if (!checkRateLimit()) {
+        showAlert('loginAlert', 'Too many attempts. Please wait.', 'error');
+        return;
+      }
+
+      const email = document.getElementById('loginEmail').value.trim();
+      const password = document.getElementById('loginPassword').value;
+      const btn = document.getElementById('loginBtn');
+      const btnText = btn.querySelector('.btn-text');
+      const spinner = btn.querySelector('.spinner');
+
+      // Basic validation
+      if (!email || !password) {
+        showAlert('loginAlert', 'Please enter email and password.', 'error');
+        return;
+      }
+
+      // Show loading
+      btn.disabled = true;
+      btnText.style.display = 'none';
+      spinner.style.display = 'block';
+      hideAlert('loginAlert');
+
+      try {
+        // Record attempt before trying
+        recordLoginAttempt();
+
+        // Attempt sign in
+        const userCredential = await signInWithEmailAndPassword(auth, email, password);
+        const user = userCredential.user;
+
+        // Verify employee status
+        const employeeDoc = await getDoc(doc(db, 'employees', user.uid));
+        
+        if (!employeeDoc.exists()) {
+          await auth.signOut();
+          throw new Error('Account not found in employee database.');
+        }
+
+        if (!employeeDoc.data().active) {
+          await auth.signOut();
+          throw new Error('Your account has been deactivated. Contact your manager.');
+        }
+
+        // Update last login
+        await updateDoc(doc(db, 'employees', user.uid), {
+          lastLogin: serverTimestamp(),
+          loginCount: (employeeDoc.data().loginCount || 0) + 1
+        });
+
+        // Log successful login (audit)
+        await setDoc(doc(collection(db, 'audit_logs')), {
+          action: 'AUTH_LOGIN',
+          userId: user.uid,
+          email: user.email,
+          timestamp: new Date().toISOString(),
+          userAgent: navigator.userAgent,
+          success: true
+        });
+
+        // Clear rate limit on success
+        loginAttempts = [];
+
+        // Redirect to main app
+        showAlert('loginAlert', 'Login successful! Redirecting...', 'success');
+        setTimeout(() => {
+          window.location.href = 'index.html';
+        }, 1000);
+
+      } catch (err) {
+        console.error('Login error:', err);
+        
+        // Log failed attempt (audit)
+        try {
+          await setDoc(doc(collection(db, 'audit_logs')), {
+            action: 'AUTH_LOGIN_FAILED',
+            email: email,
+            timestamp: new Date().toISOString(),
+            userAgent: navigator.userAgent,
+            error: err.code || err.message,
+            success: false
+          });
+        } catch (logErr) {
+          console.error('Failed to log auth attempt:', logErr);
+        }
+
+        // User-friendly error messages (limited info for security)
+        let message = 'Invalid email or password.';
+        if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
+          message = 'Invalid email or password.';
+        } else if (err.code === 'auth/too-many-requests') {
+          message = 'Too many attempts. Please try again later.';
+        } else if (err.code === 'auth/user-disabled') {
+          message = 'This account has been disabled.';
+        } else if (err.message) {
+          message = err.message;
+        }
+        
+        showAlert('loginAlert', message, 'error');
+      } finally {
+        btn.disabled = false;
+        btnText.style.display = 'inline';
+        spinner.style.display = 'none';
+      }
+    });
+
+    // ═══════════════════════════════════════════════════════════════
+    // REGISTRATION HANDLER
+    // ═══════════════════════════════════════════════════════════════
+    // Flow: Validate invite code → Create Firebase Auth user → Create employee doc →
+    // Mark invite as used → Audit log → Redirect
+    // Invite codes are single-use and stored in 'invites' collection
+    document.getElementById('registerForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      // Rate limit check
+      if (!checkRateLimit()) {
+        showAlert('registerAlert', 'Too many attempts. Please wait.', 'error');
+        return;
+      }
+
+      const inviteCode = document.getElementById('inviteCode').value.trim().toUpperCase();
+      const name = document.getElementById('registerName').value.trim();
+      const email = document.getElementById('registerEmail').value.trim();
+      const password = document.getElementById('registerPassword').value;
+      const confirm = document.getElementById('confirmPassword').value;
+      const btn = document.getElementById('registerBtn');
+      const btnText = btn.querySelector('.btn-text');
+      const spinner = btn.querySelector('.spinner');
+
+      // Validations
+      if (password !== confirm) {
+        showAlert('registerAlert', 'Passwords do not match.', 'error');
+        return;
+      }
+
+      const strength = checkPasswordStrength(password);
+      if (strength.level === 'weak') {
+        showAlert('registerAlert', 'Password is too weak. Please use a stronger password.', 'error');
+        return;
+      }
+
+      // Show loading
+      btn.disabled = true;
+      btnText.style.display = 'none';
+      spinner.style.display = 'block';
+      hideAlert('registerAlert');
+
+      try {
+        recordLoginAttempt();
+
+        // 1. Verify invite code
+        const inviteQuery = query(
+          collection(db, 'invite_codes'),
+          where('code', '==', inviteCode),
+          where('used', '==', false)
+        );
+        const inviteSnapshot = await getDocs(inviteQuery);
+
+        if (inviteSnapshot.empty) {
+          throw new Error('Invalid or expired invite code.');
+        }
+
+        const inviteDoc = inviteSnapshot.docs[0];
+        const inviteData = inviteDoc.data();
+
+        // Check expiration
+        if (inviteData.expiresAt && new Date(inviteData.expiresAt) < new Date()) {
+          throw new Error('This invite code has expired.');
+        }
+
+        // 2. Create Firebase Auth user
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        const user = userCredential.user;
+
+        // 3. Update user profile
+        await updateProfile(user, { displayName: name });
+
+        // 4. Create employee record
+        await setDoc(doc(db, 'employees', user.uid), {
+          name: name,
+          email: email,
+          role: inviteData.role || 'staff',
+          active: true,
+          createdAt: serverTimestamp(),
+          createdBy: inviteData.createdBy || 'system',
+          inviteCode: inviteCode,
+          lastLogin: null,
+          loginCount: 0
+        });
+
+        // 5. Mark invite code as used
+        await updateDoc(doc(db, 'invite_codes', inviteDoc.id), {
+          used: true,
+          usedBy: user.uid,
+          usedAt: serverTimestamp()
+        });
+
+        // 6. Audit log
+        await setDoc(doc(collection(db, 'audit_logs')), {
+          action: 'AUTH_REGISTER',
+          userId: user.uid,
+          email: email,
+          timestamp: new Date().toISOString(),
+          inviteCode: inviteCode,
+          success: true
+        });
+
+        // Clear rate limit on success
+        loginAttempts = [];
+
+        showAlert('registerAlert', 'Account created successfully! Redirecting...', 'success');
+        setTimeout(() => {
+          window.location.href = 'index.html';
+        }, 1500);
+
+      } catch (err) {
+        console.error('Registration error:', err);
+
+        // Audit log failed attempt
+        try {
+          await setDoc(doc(collection(db, 'audit_logs')), {
+            action: 'AUTH_REGISTER_FAILED',
+            email: email,
+            timestamp: new Date().toISOString(),
+            error: err.code || err.message,
+            success: false
+          });
+        } catch (logErr) {
+          console.error('Failed to log registration attempt:', logErr);
+        }
+
+        let message = 'Registration failed. Please try again.';
+        if (err.code === 'auth/email-already-in-use') {
+          message = 'This email is already registered.';
+        } else if (err.code === 'auth/invalid-email') {
+          message = 'Please enter a valid email address.';
+        } else if (err.code === 'auth/weak-password') {
+          message = 'Password is too weak.';
+        } else if (err.message) {
+          message = err.message;
+        }
+
+        showAlert('registerAlert', message, 'error');
+      } finally {
+        btn.disabled = false;
+        btnText.style.display = 'inline';
+        spinner.style.display = 'none';
+      }
+    });
+
+    // ═══════════════════════════════════════════════════════════════
+    // FORGOT PASSWORD
+    // ═══════════════════════════════════════════════════════════════
+    document.getElementById('forgotPasswordBtn').addEventListener('click', async () => {
+      const email = document.getElementById('loginEmail').value.trim();
+      
+      if (!email) {
+        showAlert('loginAlert', 'Please enter your email address first.', 'warning');
+        return;
+      }
+
+      if (!checkRateLimit()) {
+        showAlert('loginAlert', 'Too many attempts. Please wait.', 'error');
+        return;
+      }
+
+      try {
+        recordLoginAttempt();
+        await sendPasswordResetEmail(auth, email);
+        showAlert('loginAlert', 'Password reset email sent. Check your inbox.', 'success');
+      } catch (err) {
+        // Don't reveal if email exists or not
+        showAlert('loginAlert', 'If this email is registered, you will receive a reset link.', 'success');
+      }
+    });
+
+  </script>
+</body>
+</html>
