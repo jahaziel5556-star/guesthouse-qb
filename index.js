@@ -984,18 +984,45 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       if (found) {
         customerId = found.Id;
       } else {
-        const custResp = await axios.post(
-          `${API_BASE}${tokens.realmId}/customer`,
-          {
-            DisplayName: name,
-            PrimaryEmailAddr: email ? { Address: email } : undefined,
-            PrimaryPhone: phone ? { FreeFormNumber: phone } : undefined,
-            BillAddr: { Line1: address || "N/A" },
-            ResaleNum: customerNumber || "",
-          },
-          { headers }
-        );
-        customerId = custResp.data.Customer.Id;
+        try {
+          const custResp = await axios.post(
+            `${API_BASE}${tokens.realmId}/customer`,
+            {
+              DisplayName: name,
+              PrimaryEmailAddr: email ? { Address: email } : undefined,
+              PrimaryPhone: phone ? { FreeFormNumber: phone } : undefined,
+              BillAddr: { Line1: address || "N/A" },
+              ResaleNum: customerNumber || "",
+            },
+            { headers }
+          );
+          customerId = custResp.data.Customer.Id;
+        } catch (custErr) {
+          const custErrStr = JSON.stringify(custErr.response?.data || custErr.message || '');
+          // If customer already exists in QB (name collision), try to find them
+          if (/already exists|Duplicate|name supplied/i.test(custErrStr)) {
+            log(`Customer '${name}' already exists in QB, searching...`);
+            // Broader search: query all customers and find by display name (case-insensitive)
+            const searchData = await qboQuery(tokens, `select * from Customer where DisplayName = '${name.replace(/'/g, "\\\'")}' maxresults 5`);
+            const existingCust = searchData.QueryResponse.Customer?.[0];
+            if (existingCust) {
+              customerId = existingCust.Id;
+              log(`Found existing customer: ${existingCust.DisplayName} (ID: ${customerId})`);
+            } else {
+              // Try partial match as fallback
+              const partialData = await qboQuery(tokens, `select * from Customer where DisplayName LIKE '%${name.replace(/'/g, "\\\'")}%' maxresults 5`);
+              const partialCust = partialData.QueryResponse.Customer?.[0];
+              if (partialCust) {
+                customerId = partialCust.Id;
+                log(`Found customer by partial match: ${partialCust.DisplayName} (ID: ${customerId})`);
+              } else {
+                throw new Error(`Customer '${name}' creation failed and could not find existing: ${custErrStr}`);
+              }
+            }
+          } else {
+            throw custErr;
+          }
+        }
       }
       map[key] = customerId;
       fs.writeFileSync(CUSTOMER_MAP_PATH, JSON.stringify(map, null, 2));
@@ -1113,6 +1140,8 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       userMessage = "Authentication expired. Please re-authorize QuickBooks.";
     } else if (errStr.includes('Duplicate') || errStr.includes('DocNumber')) {
       userMessage = "Receipt number already exists. A new one will be generated.";
+    } else if (/already exists|name supplied/i.test(errStr)) {
+      userMessage = "Customer name conflict in QuickBooks. Please try again.";
     } else if (errStr.includes('Customer')) {
       userMessage = "Error with customer record. Please check customer details.";
     } else if (errStr.includes('Invalid Reference Id') || errStr.includes('ItemRef') || errStr.includes('DepositToAccountRef')) {

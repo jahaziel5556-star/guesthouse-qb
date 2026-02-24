@@ -2028,14 +2028,28 @@ async function retryFailedQBSyncsFromFirestore() {
           qbPaymentData: null // Clear stored data after successful sync
         });
       } catch (err) {
-        Logger.warn(`Payment ${payment.receiptNumber} QB sync retry failed:`, err.message);
+        const errMsg = err.message || '';
         
-        // Increment attempt count
-        await updateDoc(doc(db, 'payments', payment.id), {
-          qbSyncAttempts: (payment.qbSyncAttempts || 0) + 1,
-          qbSyncError: err.message || 'Unknown error',
-          qbLastAttempt: new Date().toISOString()
-        });
+        // If QB says receipt already exists, mark as synced (it went through before)
+        if (/already exists|Duplicate|DocNumber/i.test(errMsg)) {
+          Logger.info(`Payment ${payment.receiptNumber} already exists in QuickBooks - marking as synced`);
+          await updateDoc(doc(db, 'payments', payment.id), {
+            qbSyncStatus: 'synced',
+            qbSyncedAt: new Date().toISOString(),
+            qbSyncError: null,
+            qbPaymentData: null,
+            qbSyncNote: 'Already existed in QuickBooks'
+          });
+        } else {
+          Logger.warn(`Payment ${payment.receiptNumber} QB sync retry failed:`, errMsg);
+        
+          // Increment attempt count
+          await updateDoc(doc(db, 'payments', payment.id), {
+            qbSyncAttempts: (payment.qbSyncAttempts || 0) + 1,
+            qbSyncError: errMsg || 'Unknown error',
+            qbLastAttempt: new Date().toISOString()
+          });
+        }
       }
     }
   } catch (err) {
