@@ -45,9 +45,10 @@
     connect-src 'self' https://*.firebaseio.com https://*.googleapis.com https://guesthouse-curl.onrender.com https://www.gstatic.com https://cdn.jsdelivr.net;
     base-uri 'self';
     form-action 'self';
+    frame-ancestors 'none';
   ">
   <meta http-equiv="X-Content-Type-Options" content="nosniff">
-  <!-- Note: X-Frame-Options should be set via HTTP headers, not meta tags -->
+  <meta http-equiv="X-Frame-Options" content="DENY">
   <meta http-equiv="X-XSS-Protection" content="1; mode=block">
   <meta name="referrer" content="strict-origin-when-cross-origin">
   
@@ -3208,23 +3209,16 @@
       </div>
 
       <label for="name">Name:</label>
-      <input type="text" id="name" required />
+      <input type="text" id="name" required minlength="2" maxlength="100" placeholder="Full name" autocomplete="off" />
 
       <label for="address">Address:</label>
-      <input type="text" id="address" required />
+      <input type="text" id="address" required minlength="3" maxlength="200" placeholder="Full address" autocomplete="off" />
 
       <label for="telephone">Telephone:</label>
-      <input type="tel" id="telephone" required />
+      <input type="tel" id="telephone" required minlength="7" maxlength="20" pattern="[0-9+\-()\s]{7,20}" placeholder="e.g. 1-767-555-1234" title="Enter a valid phone number (digits, +, -, spaces, parentheses)" autocomplete="off" />
 
       <label for="customer-email">Email:</label>
-      <input type="email" id="customer-email" required />
-
-      <label for="specialOffer">Special Offer:</label>
-      <select id="specialOffer">
-        <option value="">None</option>
-        <option value="2plus1">Pay for 2 Nights, Get 1 Free</option>
-        <option value="4plus3">Pay for 4 Nights, Get 3 Free</option>
-      </select>
+      <input type="email" id="customer-email" required maxlength="254" placeholder="email@example.com" autocomplete="off" />
 
       <label for="arrival">Arrival Date: </label>
       <input type="date" id="arrival" required />
@@ -3284,16 +3278,16 @@
       <h3>Edit Customer Information</h3>
 
       <label for="editCustomerName">Name:</label>
-      <input type="text" id="editCustomerName" />
+      <input type="text" id="editCustomerName" minlength="2" maxlength="100" />
 
       <label for="editCustomerPhone">Telephone:</label>
-      <input type="tel" id="editCustomerPhone" />
+      <input type="tel" id="editCustomerPhone" minlength="7" maxlength="20" pattern="[0-9+\-()\s]{7,20}" title="Enter a valid phone number" />
 
       <label for="editCustomerAddress">Address:</label>
-      <input type="text" id="editCustomerAddress" />
+      <input type="text" id="editCustomerAddress" minlength="3" maxlength="200" />
 
       <label for="editCustomerEmail">Email:</label>
-      <input type="email" id="editCustomerEmail" />
+      <input type="email" id="editCustomerEmail" maxlength="254" />
 
       <!-- ID Image Section -->
       <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border-light, #e2e8f0);">
@@ -3361,13 +3355,6 @@
 
       <label for="extendDeparture">New Departure Date:</label>
       <input type="date" id="extendDeparture" required />
-
-      <label for="extendSpecialOffer">Special Offer:</label>
-      <select id="extendSpecialOffer">
-        <option value="">None</option>
-        <option value="2plus1">Pay 2 Nights Get 1 Free (3 nights)</option>
-        <option value="4plus3">Pay 4 Nights Get 3 Free (7 nights)</option>
-      </select>
 
       <label for="extendPaymentRate">Rate per Night ($):</label>
       <input type="number" id="extendPaymentRate" placeholder="Rate per night" step="0.01" min="0" />

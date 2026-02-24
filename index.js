@@ -112,8 +112,11 @@ function securityHeaders(req, res, next) {
   res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'");
   // Strict Transport Security (HTTPS only)
   res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-  // Permissions Policy
-  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  // Permissions Policy - restrict sensitive browser features
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=(), payment=(), usb=(), magnetometer=(), gyroscope=(), accelerometer=()');
+  // Prevent caching of sensitive responses
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
   next();
 }
 
@@ -474,11 +477,19 @@ app.use((req, res, next) => {
  * @returns {string} Authorization URL
  * @throws {Error} If CLIENT_ID or REDIRECT_URI not configured
  */
+/** Pending OAuth state tokens for CSRF validation */
+const pendingOAuthStates = new Map();
+
 function buildAuthUrl() {
   if (!process.env.CLIENT_ID || !process.env.REDIRECT_URI) {
     throw new Error("Missing CLIENT_ID or REDIRECT_URI");
   }
-  const state = Math.random().toString(36).substring(2);
+  const state = require('crypto').randomBytes(16).toString('hex');
+  pendingOAuthStates.set(state, Date.now());
+  // Clean up old states older than 10 minutes
+  for (const [s, t] of pendingOAuthStates.entries()) {
+    if (Date.now() - t > 600000) pendingOAuthStates.delete(s);
+  }
   return (
     `${AUTH_BASE}?client_id=${process.env.CLIENT_ID}` +
     `&redirect_uri=${encodeURIComponent(process.env.REDIRECT_URI)}` +
@@ -541,7 +552,7 @@ async function getAccessToken() {
       realmId: tokens.realmId,
     };
 
-    fs.writeFileSync(TOKEN_PATH, JSON.stringify(updated, null, 2));
+    fs.writeFileSync(TOKEN_PATH, JSON.stringify(updated, null, 2), { mode: 0o600 });
     log("Token refreshed.");
     return updated;
   } catch (err) {
@@ -744,22 +755,20 @@ app.get("/health", (_req, res) => {
   res.json({
     ok: true,
     env: ENV,
-    allowedOrigins: ALLOWED_ORIGINS,
-    itemName: DEFAULT_ITEM_NAME,
-    itemRefId: ITEM_REF_ID,
-    depositAccountId: DEPOSIT_ACCOUNT_ID,
-    allowItemCreate: ALLOW_ITEM_CREATE,
-    taxCodeProvided: RAW_TAX_CODE || null,
-    taxAgencyProvided: RAW_TAX_AGENCY || null,
-    fallbackTaxPercent: FALLBACK_TAX_PERCENT,
+    timestamp: new Date().toISOString()
   });
 });
 
 /**
  * Debug endpoint to list all QuickBooks accounts
  * Use this to find the correct Account ID for DepositToAccountRef
+ * Protected: requires ?key= query parameter matching DEBUG_KEY env var
  */
-app.get("/debug/accounts", async (_req, res) => {
+app.get("/debug/accounts", async (req, res) => {
+  const debugKey = process.env.DEBUG_KEY;
+  if (!debugKey || req.query.key !== debugKey) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
   try {
     const tokens = await getAccessToken();
     const data = await qboQuery(tokens, "SELECT * FROM Account WHERE AccountType IN ('Bank', 'Other Current Asset') MAXRESULTS 100");
@@ -782,8 +791,13 @@ app.get("/debug/accounts", async (_req, res) => {
 /**
  * Debug endpoint to list all QuickBooks items
  * Use this to verify the Item ID for Sales - Guest House Accommodation
+ * Protected: requires ?key= query parameter matching DEBUG_KEY env var
  */
-app.get("/debug/items", async (_req, res) => {
+app.get("/debug/items", async (req, res) => {
+  const debugKey = process.env.DEBUG_KEY;
+  if (!debugKey || req.query.key !== debugKey) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
   try {
     const tokens = await getAccessToken();
     const data = await qboQuery(tokens, "SELECT * FROM Item WHERE Type = 'Service' MAXRESULTS 100");
@@ -825,9 +839,17 @@ app.get("/auth", (_req, res) => {
  * Exchanges authorization code for tokens and stores them
  */
 app.get("/callback", async (req, res) => {
-  const { code, realmId } = req.query;
+  const { code, realmId, state } = req.query;
   if (!code || !realmId)
     return res.status(400).send("Missing ?code or ?realmId");
+  
+  // CSRF validation: verify state parameter
+  if (!state || !pendingOAuthStates.has(state)) {
+    log('[SECURITY] OAuth callback with invalid state parameter');
+    return res.status(403).send('Invalid or expired state parameter. Please try authorizing again.');
+  }
+  pendingOAuthStates.delete(state);
+  
   try {
     const params = new URLSearchParams({
       grant_type: "authorization_code",
@@ -853,11 +875,12 @@ app.get("/callback", async (req, res) => {
       realmId,
     };
 
-    fs.writeFileSync(TOKEN_PATH, JSON.stringify(data, null, 2));
+    fs.writeFileSync(TOKEN_PATH, JSON.stringify(data, null, 2), { mode: 0o600 });
     log("QuickBooks Authorized.");
     res.send("✅ QuickBooks authorized successfully. You may close this tab.");
   } catch (err) {
-    res.status(500).send(`❌ Error: ${JSON.stringify(err.response?.data || err)}`);
+    log('[ERROR] OAuth callback failed:', err.response?.data || err.message);
+    res.status(500).send("❌ Authorization failed. Please try again.");
   }
 });
 

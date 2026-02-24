@@ -111,12 +111,6 @@ const APP_CONFIG = {
     SENSITIVE_FIELDS: ['password', 'token', 'secret', 'apiKey']
   },
   
-  // ─── Special Offers Configuration ───────────────────────────────────────────
-  SPECIAL_OFFERS: {
-    '2plus1': { nights: 2, free: 1, label: '2+1 (Pay 2, Stay 3)' },
-    '4plus3': { nights: 4, free: 3, label: '4+3 (Pay 4, Stay 7)' }
-  },
-  
   // ─── API Endpoints ──────────────────────────────────────────────────────────
   API: {
     BASE_URL: 'https://guesthouse-curl.onrender.com',
@@ -1823,8 +1817,7 @@ async function sendToQuickBooks(paymentData) {
 function buildQuickBooksPaymentData(payment, reservation, customer, employee = null) {
   const nights = reservation ? calculateSpecialNights(
     reservation.arrivalDate, 
-    reservation.departureDate, 
-    reservation.specialOffer
+    reservation.departureDate
   ) : 1;
   
   let paymentDate = new Date().toISOString().split("T")[0];
@@ -1851,7 +1844,6 @@ function buildQuickBooksPaymentData(payment, reservation, customer, employee = n
     checkout: reservation?.departureDate || '',
     nights: nights,
     rate: parseFloat(reservation?.rate || 0),
-    specialOffer: reservation?.specialOffer || '',
     notes: reservation?.notes || '',
     recordedBy: employee?.name || payment.recordedByName || window._currentEmployee?.name || 'Staff',
     paymentId: payment.id || '',
@@ -2333,7 +2325,7 @@ async function openManagePaymentModal(reservation) {
   }
 
   const customer = customers.find(c => c.id === reservation.customerId) || {};
-  const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate, reservation.specialOffer);
+  const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate);
 
   // Fetch all payments for this reservation (including voided for display)
   const paymentsSnapshot = await getDocs(collection(db, "payments"));
@@ -2625,7 +2617,7 @@ if (summaryBtn) {
             const totalPaid = allResPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
             
             // Calculate total due
-            const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate, reservation.specialOffer);
+            const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate);
             const baseTotal = (parseFloat(reservation.rate) || 0) * nights;
             const adjustments = reservation.balanceAdjustments || [];
             const totalAdjustment = adjustments.reduce((sum, adj) => {
@@ -2707,7 +2699,7 @@ if (summaryBtn) {
         // Recalculate payment status (exclude voided payments)
         const remainingActivePayments = activePayments.filter(p => p.id !== paymentId);
         const totalPaidAfterVoid = remainingActivePayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-        const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate, reservation.specialOffer);
+        const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate);
         const baseTotal = (parseFloat(reservation.rate) || 0) * nights;
         // Include balance adjustments
         const adjustments = reservation.balanceAdjustments || [];
@@ -2796,7 +2788,7 @@ if (summaryBtn) {
           .filter(p => p.reservationId === reservation.id && !p.voided);
         
         const totalPaidAfterUnvoid = allPaymentsForRes.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-        const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate, reservation.specialOffer);
+        const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate);
         const baseTotal = (parseFloat(reservation.rate) || 0) * nights;
         // Include balance adjustments
         const adjustments = reservation.balanceAdjustments || [];
@@ -2901,7 +2893,7 @@ if (summaryBtn) {
     });
   });
 
-  // 🔹 Email receipt button (unchanged except using reservation.note + specialOffer)
+  // 🔹 Email receipt button
   const sendBtn = document.getElementById("send-receipt-email-btn");
   const clonedBtn = sendBtn.cloneNode(true);
   sendBtn.parentNode.replaceChild(clonedBtn, sendBtn);
@@ -2944,13 +2936,7 @@ if (summaryBtn) {
         balance: Math.max(0, total - totalPaid).toFixed(2),
         total_amount: total.toFixed(2),
         receipt_number: payment.receiptNumber,
-        special_offer: reservation.specialOffer 
-          ? (reservation.specialOffer === '2plus1'
-              ? 'Special: Pay for 2 nights get 1 extra night free'
-              : reservation.specialOffer === '4plus3'
-                ? 'Special: Pay for 4 nights get 3 extra nights free'
-                : reservation.specialOffer)
-          : 'None',
+        special_offer: 'None',
         notes: reservation.note && reservation.note.trim() !== '' 
           ? `Notes: ${reservation.note}` 
           : 'None'
@@ -3043,7 +3029,7 @@ if (summaryBtn) {
         <!DOCTYPE html>
         <html>
         <head>
-          <title>Receipt - ${customer.name || 'Guest'}</title>
+          <title>Receipt - ${escapeHTML(customer.name || 'Guest')}</title>
           <style>
             body { font-family: Arial, sans-serif; padding: 20px; color: #222; }
             h2 { text-align: center; margin-bottom: 16px; }
@@ -3055,10 +3041,10 @@ if (summaryBtn) {
           <div style="background:#f5f5f5;padding:16px;border-radius:8px;margin-bottom:16px;">
             <h3 style="margin:0 0 12px 0;font-size:1.1em;">👤 Customer</h3>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-              <div><strong>Name:</strong></div><div>${customer.name || 'Unknown'}</div>
-              <div><strong>Phone:</strong></div><div>${customer.telephone || 'N/A'}</div>
-              <div><strong>Email:</strong></div><div>${customer.email || 'N/A'}</div>
-              <div><strong>Address:</strong></div><div>${customer.address || 'N/A'}</div>
+              <div><strong>Name:</strong></div><div>${escapeHTML(customer.name || 'Unknown')}</div>
+              <div><strong>Phone:</strong></div><div>${escapeHTML(customer.telephone || 'N/A')}</div>
+              <div><strong>Email:</strong></div><div>${escapeHTML(customer.email || 'N/A')}</div>
+              <div><strong>Address:</strong></div><div>${escapeHTML(customer.address || 'N/A')}</div>
             </div>
           </div>
           
@@ -3162,7 +3148,7 @@ if (summaryBtn) {
         });
         
         // Calculate new payment status for the reservation
-        const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate, reservation.specialOffer);
+        const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate);
         const baseTotal = (parseFloat(reservation.rate) || 0) * nights;
         const adjustments = reservation.balanceAdjustments || [];
         const totalAdjustment = adjustments.reduce((sum, adj) => {
@@ -3533,7 +3519,7 @@ function openMaintenanceModal(roomNumber) {
     
     // Checkout button handler
     checkoutBtn.onclick = async () => {
-      if (!confirm(`Checkout ${customer.name || 'guest'} from Room ${roomNumber}?`)) return;
+      if (!confirm(`Checkout ${escapeHTML(customer.name || 'guest')} from Room ${roomNumber}?`)) return;
       
       try {
         // Update reservation to mark as checked out
@@ -3552,7 +3538,7 @@ function openMaintenanceModal(roomNumber) {
           actualCheckout: todayStr
         }, 'reservation', activeReservation.id);
         
-        alert(`✅ ${customer.name || 'Guest'} checked out from Room ${roomNumber}`);
+        alert(`✅ ${escapeHTML(customer.name || 'Guest')} checked out from Room ${roomNumber}`);
         ModalManager.close('maintenanceModal');
         await fillDashboard(); // Refresh the grid
       } catch (err) {
@@ -3752,7 +3738,10 @@ function validateAddress(address) {
 }
 
 function validateTelephone(tel) {
-  return tel && tel.trim().length >= 7;  // At least 7 digits
+  if (!tel || tel.trim().length < 7) return false;
+  // Allow digits, spaces, +, -, parentheses. Must have at least 7 digit characters.
+  const cleaned = tel.replace(/[^0-9]/g, '');
+  return cleaned.length >= 7 && cleaned.length <= 15 && /^[0-9+\-()\s]+$/.test(tel.trim());
 }
 
 function validateRoom(room) {
@@ -3795,7 +3784,6 @@ document.getElementById("saveReservationBtn")?.addEventListener("click", async (
   const departureDate = document.getElementById("departure").value;
   const roomNumber = document.getElementById("room").value.trim();
   const rate = parseFloat(document.getElementById("reservationRate").value);
-  const specialOffer = document.getElementById("specialOffer").value;
   const note = document.getElementById("reservationNote").value || "";
 
   if (isNaN(rate) || rate < 0) {
@@ -3803,13 +3791,6 @@ document.getElementById("saveReservationBtn")?.addEventListener("click", async (
     resetSaveButton();
     return;
   }
-
-// Validate offer match with selected dates
-if (specialOffer && !calculateSpecialNights(arrivalDate, departureDate, specialOffer)) {
-  alert("Selected special requires specific number of nights. Please adjust your dates.");
-  resetSaveButton();
-  return;
-}
 
 // ===========================================================================
 // CHECK FOR OVERLAPPING RESERVATIONS
@@ -3937,14 +3918,13 @@ if (hasBlockingOverlap) {
     console.log('📝 Creating reservation by:', creator.name);
     
     // Calculate initial nights
-    const initialNights = calculateSpecialNights(arrivalDate, departureDate, specialOffer);
+    const initialNights = calculateSpecialNights(arrivalDate, departureDate);
     
     const reservationDoc = await addDoc(collection(db, "reservations"), {
       customerId,
       arrivalDate,
       departureDate,
       roomNumber,
-      specialOffer,
       note,
       rate,
       paymentStatus: "unpaid",
@@ -3960,7 +3940,6 @@ if (hasBlockingOverlap) {
         departureDate: departureDate,
         nights: initialNights,
         rate: rate,
-        specialOffer: specialOffer,
         by: creator.uid,
         byName: creator.name
       }]
@@ -3972,8 +3951,7 @@ if (hasBlockingOverlap) {
       roomNumber: roomNumber,
       arrivalDate: arrivalDate,
       departureDate: departureDate,
-      rate: rate,
-      specialOffer: specialOffer
+      rate: rate
     }, 'reservation', reservationDoc.id);
 
     alert("Reservation saved successfully.");
@@ -4154,7 +4132,7 @@ document.getElementById("confirmPaymentBtn")?.addEventListener("click", async ()
       .map(d => ({ id: d.id, ...d.data() }))
       .filter(p => p.reservationId === latestReservationId);
 
-    const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate, reservation.specialOffer);
+    const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate);
     const baseTotal = (parseFloat(reservation.rate) || 0) * nights;
     // Include balance adjustments (usually empty for new reservations)
     const adjustments = reservation.balanceAdjustments || [];
@@ -4379,7 +4357,7 @@ document.getElementById("idUploadInput")?.addEventListener("change", function (e
   const rate = parseFloat(reservation.rate || 0);
   const arrival = new Date(reservation.arrivalDate);
   const departure = new Date(reservation.departureDate);
-  const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate, reservation.specialOffer);
+  const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate);
   const baseTotal = (parseFloat(reservation.rate) || 0) * nights;
   // Include balance adjustments
   const adjustments = reservation.balanceAdjustments || [];
@@ -4613,7 +4591,6 @@ async function renderAvailabilityGrid() {
  * @param {string} reservation.paymentStatus - not_paid|partially_paid|fully_paid
  * @param {boolean} reservation.checkedIn - Whether guest has checked in
  * @param {boolean} reservation.checkedOut - Whether guest has checked out
- * @param {string} reservation.specialOffer - Promo code (2plus1|4plus3|"")
  * @param {string} reservation.note - Special instructions/notes
  */
 function showEditDeletePopup(reservation) {
@@ -4798,16 +4775,6 @@ function showEditDeletePopup(reservation) {
         </div>
         <div class="form-row">
           <div class="form-group">
-            <label>Special Offer</label>
-            <select id="editSpecialOffer">
-              <option value="">None</option>
-              <option value="2plus1">Pay 2 Get 1 Free</option>
-              <option value="4plus3">Pay 4 Get 3 Free</option>
-            </select>
-          </div>
-        </div>
-        <div class="form-row">
-          <div class="form-group">
             <label>Check-in Date</label>
             <input type="date" id="editArrivalDate" value="${reservation.arrivalDate}" />
           </div>
@@ -4818,7 +4785,7 @@ function showEditDeletePopup(reservation) {
         </div>
         <div class="form-group">
           <label>Note</label>
-          <textarea id="editNote" rows="2">${reservation.note || ''}</textarea>
+          <textarea id="editNote" rows="2">${escapeHTML(reservation.note || '')}</textarea>
         </div>
       </div>
 
@@ -5027,9 +4994,6 @@ function showEditDeletePopup(reservation) {
     };
   };
 
-  // Pre-fill special offer
-  overlay.querySelector("#editSpecialOffer").value = reservation.specialOffer || "";
-
   // Cancel overlay
   overlay.querySelector("#cancelPopup").onclick = () => overlay.remove();
 
@@ -5086,7 +5050,6 @@ function showEditDeletePopup(reservation) {
     const room = overlay.querySelector("#editRoom").value.trim();
     const rateInput = overlay.querySelector("#editRate").value;
     const newRate = rateInput ? parseFloat(rateInput) : null;
-    const specialOffer = overlay.querySelector("#editSpecialOffer").value;
     const note = overlay.querySelector("#editNote").value.trim();
     const arrivalDate = overlay.querySelector("#editArrivalDate").value;
     const departureDate = overlay.querySelector("#editDepartureDate").value;
@@ -5095,7 +5058,6 @@ function showEditDeletePopup(reservation) {
     const oldRate = parseFloat(reservation.rate) || 0;
     const oldArrivalDate = reservation.arrivalDate;
     const oldDepartureDate = reservation.departureDate;
-    const oldSpecialOffer = reservation.specialOffer || '';
     const oldRoom = reservation.roomNumber;
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -5142,7 +5104,6 @@ function showEditDeletePopup(reservation) {
     // ─────────────────────────────────────────────────────────────────────────
     const rateChanged = newRate !== null && newRate !== oldRate;
     const datesChanged = arrivalDate !== oldArrivalDate || departureDate !== oldDepartureDate;
-    const offerChanged = specialOffer !== oldSpecialOffer;
     // roomChanged already defined above for overlap check
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -5150,7 +5111,6 @@ function showEditDeletePopup(reservation) {
     // ─────────────────────────────────────────────────────────────────────────
     const updateData = {
       roomNumber: room,
-      specialOffer,
       note,
       arrivalDate,
       departureDate
@@ -5165,7 +5125,7 @@ function showEditDeletePopup(reservation) {
     // RECALCULATE PAYMENT STATUS: When rate/dates/offer changes, balance changes
     // This ensures receipts and payment displays stay consistent
     // ─────────────────────────────────────────────────────────────────────────
-    if (rateChanged || datesChanged || offerChanged) {
+    if (rateChanged || datesChanged) {
       try {
         // Get all payments for this reservation (excluding voided ones)
         const paymentsSnapshot = await getDocs(collection(db, "payments"));
@@ -5173,9 +5133,9 @@ function showEditDeletePopup(reservation) {
           .map(d => ({ id: d.id, ...d.data() }))
           .filter(p => p.reservationId === reservation.id && !p.voided);
         
-        // Calculate new total due with updated rate/dates/offer
+        // Calculate new total due with updated rate/dates
         const effectiveRate = newRate !== null ? newRate : oldRate;
-        const nights = calculateSpecialNights(arrivalDate, departureDate, specialOffer);
+        const nights = calculateSpecialNights(arrivalDate, departureDate);
         const baseTotal = effectiveRate * nights;
         
         // Include balance adjustments (discounts/fees)
@@ -5200,13 +5160,13 @@ function showEditDeletePopup(reservation) {
         updateData.paymentStatus = newPaymentStatus;
         
         // Calculate old total for comparison display
-        const oldNights = calculateSpecialNights(oldArrivalDate, oldDepartureDate, oldSpecialOffer);
+        const oldNights = calculateSpecialNights(oldArrivalDate, oldDepartureDate);
         const oldTotalDue = oldRate * oldNights + totalAdjustment;
         const oldBalance = Math.max(0, oldTotalDue - totalPaid);
         const newBalance = Math.max(0, newTotalDue - totalPaid);
         
         // Show user the impact of changes
-        if (rateChanged || datesChanged || offerChanged) {
+        if (rateChanged || datesChanged) {
           console.log(`📊 Rate change impact: Old total $${oldTotalDue.toFixed(2)} → New total $${newTotalDue.toFixed(2)}`);
           console.log(`📊 Balance change: $${oldBalance.toFixed(2)} → $${newBalance.toFixed(2)}`);
         }
@@ -5229,10 +5189,6 @@ function showEditDeletePopup(reservation) {
       if (arrivalDate !== oldArrivalDate) changes.push(`Check-in: ${formatDateDMY(oldArrivalDate)} → ${formatDateDMY(arrivalDate)}`);
       if (departureDate !== oldDepartureDate) changes.push(`Check-out: ${formatDateDMY(oldDepartureDate)} → ${formatDateDMY(departureDate)}`);
     }
-    if (offerChanged) {
-      const offerNames = { '2plus1': 'Pay 2 Get 1 Free', '4plus3': 'Pay 4 Get 3 Free', '': 'None' };
-      changes.push(`Special: ${offerNames[oldSpecialOffer] || oldSpecialOffer || 'None'} → ${offerNames[specialOffer] || specialOffer || 'None'}`);
-    }
     
     // Only add history entry if something meaningful changed
     if (changes.length > 0) {
@@ -5246,7 +5202,6 @@ function showEditDeletePopup(reservation) {
         rate: newRate !== null ? newRate : oldRate,
         arrivalDate: arrivalDate,
         departureDate: departureDate,
-        specialOffer: specialOffer,
         roomNumber: room
       });
       updateData.history = history;
@@ -5260,9 +5215,9 @@ function showEditDeletePopup(reservation) {
 
       // Build success message with details if rate/dates changed
       let successMessage = "✅ Reservation updated.";
-      if (rateChanged || datesChanged || offerChanged) {
+      if (rateChanged || datesChanged) {
         const effectiveRate = newRate !== null ? newRate : oldRate;
-        const nights = calculateSpecialNights(arrivalDate, departureDate, specialOffer);
+        const nights = calculateSpecialNights(arrivalDate, departureDate);
         const newTotal = effectiveRate * nights;
         successMessage = `✅ Reservation updated.\n\nNew Total: $${newTotal.toFixed(2)} (${nights} night${nights !== 1 ? 's' : ''} × $${effectiveRate.toFixed(2)}/night)`;
       }
@@ -5273,7 +5228,6 @@ function showEditDeletePopup(reservation) {
       // ─────────────────────────────────────────────────────────────────────────
       reservation.roomNumber = room;
       if (newRate !== null) reservation.rate = newRate;
-      reservation.specialOffer = specialOffer;
       reservation.note = note;
       reservation.arrivalDate = arrivalDate;
       reservation.departureDate = departureDate;
@@ -5386,7 +5340,7 @@ async function openLateFeeModal(reservation) {
         <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
           <div>
             <label style="font-size:0.85em; color:var(--text-muted);">Guest</label>
-            <div style="font-weight:600;">${customer.name || 'Unknown'}</div>
+            <div style="font-weight:600;">${escapeHTML(customer.name || 'Unknown')}</div>
           </div>
           <div>
             <label style="font-size:0.85em; color:var(--text-muted);">Room</label>
@@ -5575,10 +5529,9 @@ async function openLateFeeModal(reservation) {
         checkout: reservation.departureDate,
         nights: 0, // Late fee doesn't count as nights
         rate: 0,
-        specialOffer: '',
         // *** LATE FEE *** prominently in description for QuickBooks
         notes: `*** LATE FEE *** - Late checkout for Room ${reservation.roomNumber}. Original checkout: ${formatDateDMY(reservation.departureDate)}. ${lateFeeNote}`.trim(),
-        description: `*** LATE FEE *** - Room ${reservation.roomNumber} - ${customer.name || 'Guest'}`,
+        description: `*** LATE FEE *** - Room ${reservation.roomNumber} - ${escapeHTML(customer.name || 'Guest')}`,
         recordedBy: employee.name,
         paymentId: lateFeePaymentRef.id,
         reservationId: reservation.id,
@@ -5740,7 +5693,7 @@ function showReservationHistory(reservation) {
       const byName = entry.byName || 'Unknown';
       
       if (entry.type === 'created') {
-        const nights = entry.nights || calculateSpecialNights(entry.arrivalDate, entry.departureDate, entry.specialOffer);
+        const nights = entry.nights || calculateSpecialNights(entry.arrivalDate, entry.departureDate);
         timelineHTML += `
           <div style="position:relative; padding-left:40px; padding-bottom:30px; border-left:3px solid #3b82f6;">
             <div style="position:absolute; left:-12px; top:0; width:20px; height:20px; border-radius:50%; background:#3b82f6; border:3px solid #fff;"></div>
@@ -5755,7 +5708,6 @@ function showReservationHistory(reservation) {
               </div>
               <div style="font-size:0.9em; opacity:0.85;">
                 Rate: $${parseFloat(entry.rate || 0).toFixed(2)}/night
-                ${entry.specialOffer ? ` • Special: ${entry.specialOffer === '2plus1' ? 'Pay 2 Get 1 Free' : entry.specialOffer === '4plus3' ? 'Pay 4 Get 3 Free' : entry.specialOffer}` : ''}
               </div>
               <div style="font-size:0.85em; opacity:0.75; margin-top:8px; border-top:1px solid rgba(255,255,255,0.2); padding-top:8px;">
                 \ud83d\udc64 ${byName} • \ud83d\udcc5 ${entryDate}
@@ -5764,8 +5716,8 @@ function showReservationHistory(reservation) {
           </div>
         `;
       } else if (entry.type === 'extended') {
-        const extendedNights = entry.totalNights || calculateSpecialNights(reservation.arrivalDate, entry.newDeparture, entry.specialOffer);
-        const originalNights = calculateSpecialNights(reservation.arrivalDate, entry.previousDeparture, reservation.specialOffer);
+        const extendedNights = entry.totalNights || calculateSpecialNights(reservation.arrivalDate, entry.newDeparture);
+        const originalNights = calculateSpecialNights(reservation.arrivalDate, entry.previousDeparture);
         const additionalNights = extendedNights - originalNights;
         
         timelineHTML += `
@@ -5786,7 +5738,6 @@ function showReservationHistory(reservation) {
                 ${entry.paymentAmount ? ` • Payment: $${parseFloat(entry.paymentAmount).toFixed(2)}` : ''}
                 ${entry.receiptNumber ? ` • Receipt #${entry.receiptNumber}` : ''}
               </div>
-              ${entry.specialOffer ? `<div style="font-size:0.85em; opacity:0.8;">Special: ${entry.specialOffer === '2plus1' ? 'Pay 2 Get 1 Free' : entry.specialOffer === '4plus3' ? 'Pay 4 Get 3 Free' : entry.specialOffer}</div>` : ''}
               <div style="font-size:0.85em; opacity:0.75; margin-top:8px; border-top:1px solid rgba(255,255,255,0.2); padding-top:8px;">
                 \ud83d\udc64 ${byName} • \ud83d\udcc5 ${entryDate}
               </div>
@@ -5856,7 +5807,7 @@ function showReservationHistory(reservation) {
 
       <div class="reservation-info-card" style="margin-bottom:20px;">
         <div style="text-align:center; padding:15px; background:linear-gradient(135deg, #8b5cf6, #7c3aed); color:#fff; border-radius:8px;">
-          <div style="font-size:1.3em; font-weight:600;">${customer.name || 'Unknown Guest'}</div>
+          <div style="font-size:1.3em; font-weight:600;">${escapeHTML(customer.name || 'Unknown Guest')}</div>
           <div style="font-size:0.95em; opacity:0.9; margin-top:4px;">Room ${reservation.roomNumber}</div>
           <div style="font-size:0.85em; opacity:0.8; margin-top:8px;">
             Current Stay: ${formatDateDMY(reservation.arrivalDate)} to ${formatDateDMY(reservation.departureDate)}
@@ -5960,7 +5911,7 @@ async function showRoomHistory(roomNumber) {
       }
       
       html += `<tr style="border-bottom:1px solid #eee;cursor:pointer;${rowBg}" data-res-id="${res.id}">
-        <td style="padding:8px;">${customer.name || 'Unknown'}</td>
+        <td style="padding:8px;">${escapeHTML(customer.name || 'Unknown')}</td>
         <td style="padding:8px;">${res.arrivalDate || 'N/A'}</td>
         <td style="padding:8px;">${res.departureDate || 'N/A'}</td>
         <td style="padding:8px;">${checkStatus}</td>
@@ -6022,7 +5973,7 @@ async function showReceiptDetails(receiptNumber) {
   let balance = 0;
   
   if (reservation) {
-    const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate, reservation.specialOffer);
+    const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate);
     const baseTotal = (parseFloat(reservation.rate) || 0) * nights;
     // Include balance adjustments
     const adjustments = reservation.balanceAdjustments || [];
@@ -6069,17 +6020,17 @@ async function showReceiptDetails(receiptNumber) {
         <div><strong>Time:</strong></div><div>${paymentTime}</div>
         <div><strong>Amount:</strong></div><div style="color:#10b981;font-weight:600;">$${parseFloat(payment.amount).toFixed(2)}</div>
         <div><strong>Method:</strong></div><div>${paymentMethod}</div>
-        ${payment.note ? `<div><strong>Note:</strong></div><div>${payment.note}</div>` : ''}
+        ${payment.note ? `<div><strong>Note:</strong></div><div>${escapeHTML(payment.note)}</div>` : ''}
       </div>
     </div>
     
     <div style="background:var(--bg-tertiary, #f5f5f5);padding:16px;border-radius:8px;margin-bottom:16px;">
       <h3 style="margin:0 0 12px 0;font-size:1.1em;">👤 Customer</h3>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-        <div><strong>Name:</strong></div><div>${customer.name || 'Unknown'}</div>
-        <div><strong>Phone:</strong></div><div>${customer.telephone || 'N/A'}</div>
-        <div><strong>Email:</strong></div><div>${customer.email || 'N/A'}</div>
-        <div><strong>Address:</strong></div><div>${customer.address || 'N/A'}</div>
+        <div><strong>Name:</strong></div><div>${escapeHTML(customer.name || 'Unknown')}</div>
+        <div><strong>Phone:</strong></div><div>${escapeHTML(customer.telephone || 'N/A')}</div>
+        <div><strong>Email:</strong></div><div>${escapeHTML(customer.email || 'N/A')}</div>
+        <div><strong>Address:</strong></div><div>${escapeHTML(customer.address || 'N/A')}</div>
       </div>
     </div>
     
@@ -6895,7 +6846,7 @@ document.getElementById('generateBatchCloseBtn')?.addEventListener('click', asyn
   const allPaymentsForBalance = [...(window._allPaymentsCache || [])].filter(p => !p.voided);
 
   periodReservations.forEach(res => {
-    const nights = calculateSpecialNights(res.arrivalDate, res.departureDate, res.specialOffer);
+    const nights = calculateSpecialNights(res.arrivalDate, res.departureDate);
     const baseTotal = (parseFloat(res.rate) || 0) * nights;
     // Include balance adjustments
     const adjustments = res.balanceAdjustments || [];
@@ -7000,7 +6951,7 @@ document.getElementById('generateBatchCloseBtn')?.addEventListener('click', asyn
 
   for (const res of periodReservations) {
     const customer = customers.find(c => c.id === res.customerId) || {};
-    const nights = calculateSpecialNights(res.arrivalDate, res.departureDate, res.specialOffer);
+    const nights = calculateSpecialNights(res.arrivalDate, res.departureDate);
     const baseTotal = (parseFloat(res.rate) || 0) * nights;
     // Include balance adjustments
     const adjustments = res.balanceAdjustments || [];
@@ -7057,8 +7008,8 @@ document.getElementById('generateBatchCloseBtn')?.addEventListener('click', asyn
 
     tableHtml += `
       <tr style="${rowStyle} border-bottom:1px solid var(--border-light, #eee);">
-        <td style="padding:10px 8px; font-weight:500;">${customer.name || 'Unknown'}</td>
-        <td style="padding:10px 8px;">${customer.telephone || '—'}</td>
+        <td style="padding:10px 8px; font-weight:500;">${escapeHTML(customer.name || 'Unknown')}</td>
+        <td style="padding:10px 8px;">${escapeHTML(customer.telephone || '—')}</td>
         <td style="padding:10px 8px; text-align:center; font-weight:600;">${res.roomNumber}</td>
         <td style="padding:10px 8px; font-size:12px;">${formatDateDMY(res.arrivalDate)} → ${formatDateDMY(res.departureDate)}</td>
         <td style="padding:10px 8px; text-align:center; font-weight:500;">${nights}</td>
@@ -7135,7 +7086,6 @@ document.getElementById('generateBatchCloseBtn')?.addEventListener('click', asyn
       arrivalDate: r.arrivalDate || '',
       departureDate: r.departureDate || '',
       rate: r.rate || 0,
-      specialOffer: r.specialOffer || null,
       createdBy: r.createdBy || null,
       createdByName: r.createdByName || 'Unknown',
       checkedIn: r.checkedIn || false,
@@ -7250,7 +7200,7 @@ document.getElementById('downloadBatchCloseCsvBtn')?.addEventListener('click', (
 
   for (const res of periodReservations) {
     const customer = customers.find(c => c.id === res.customerId) || {};
-    const nights = calculateSpecialNights(res.arrivalDate, res.departureDate, res.specialOffer);
+    const nights = calculateSpecialNights(res.arrivalDate, res.departureDate);
     const baseTotal = (parseFloat(res.rate) || 0) * nights;
     // Include balance adjustments
     const adjustments = res.balanceAdjustments || [];
@@ -7610,7 +7560,6 @@ document.getElementById('refreshAuditLogBtn')?.addEventListener('click', searchA
  * ═══════════════════════════════════════════════════════════════════════════
  * Opens modal to extend a guest's stay with consistent variable naming:
  * - extensionNewDeparture: The new checkout date
- * - extensionSpecialOffer: Special offer code for the extension
  * - extensionRate: Rate per night (applies to entire stay)
  * - extensionAmount: Payment amount for the extension
  * - extensionMethod: Payment method
@@ -7649,7 +7598,6 @@ async function openExtendReservationModal(reservation) {
   // PREFILL EXTENSION FIELDS - Use consistent naming
   // ─────────────────────────────────────────────────────────────────────────
   const extensionDepartureInput = document.getElementById("extendDeparture");
-  const extensionOfferSelect = document.getElementById("extendSpecialOffer");
   const extensionRateInput = document.getElementById("extendPaymentRate");
   const extensionAmountInput = document.getElementById("extendPaymentAmount");
   const extensionMethodSelect = document.getElementById("extendPaymentMethod");
@@ -7657,7 +7605,6 @@ async function openExtendReservationModal(reservation) {
 
   // Set initial values from current reservation
   extensionDepartureInput.value = reservation.departureDate || "";
-  extensionOfferSelect.value = reservation.specialOffer || "";
   extensionRateInput.value = reservation.rate || "";
   extensionAmountInput.value = "";
 
@@ -7697,7 +7644,6 @@ async function openExtendReservationModal(reservation) {
   // ─────────────────────────────────────────────────────────────────────────
   const validateExtensionData = () => {
     const extensionNewDeparture = extensionDepartureInput.value;
-    const extensionSpecialOffer = extensionOfferSelect.value;
     const extensionRate = parseFloat(extensionRateInput.value) || null;
     const extensionAmount = parseFloat(extensionAmountInput.value);
 
@@ -7719,17 +7665,8 @@ async function openExtendReservationModal(reservation) {
       return null;
     }
 
-    // Check special offer matches extension duration
-    if (extensionSpecialOffer && !calculateSpecialNightsForExtension(reservation.departureDate, extensionNewDeparture, extensionSpecialOffer)) {
-      alert("Special offer duration does not match the selected extension.\n\n" +
-            "• Pay 2 Get 1 Free requires 3-night extension\n" +
-            "• Pay 4 Get 3 Free requires 7-night extension");
-      return null;
-    }
-
     return {
       extensionNewDeparture,
-      extensionSpecialOffer,
       extensionRate,
       extensionAmount
     };
@@ -7775,7 +7712,7 @@ async function openExtendReservationModal(reservation) {
       const extensionData = validateExtensionData();
       if (!extensionData) return;
 
-      const { extensionNewDeparture, extensionSpecialOffer, extensionRate, extensionAmount } = extensionData;
+      const { extensionNewDeparture, extensionRate, extensionAmount } = extensionData;
 
       // Disable buttons during processing
       disableExtensionButtons();
@@ -7797,7 +7734,6 @@ async function openExtendReservationModal(reservation) {
       try {
         const extensionReceipt = await saveExtensionPayment(reservation, {
           newDeparture: extensionNewDeparture,
-          specialOffer: extensionSpecialOffer,
           rate: extensionRate,
           amount: extensionAmount,
           method: extensionMethodSelect.value || "cash"
@@ -7824,7 +7760,6 @@ async function openExtendReservationModal(reservation) {
         } else if (window._lastReservationForPopup) {
           // Return to edit reservation modal with updated data
           window._lastReservationForPopup.departureDate = extensionNewDeparture;
-          window._lastReservationForPopup.specialOffer = extensionSpecialOffer || window._lastReservationForPopup.specialOffer;
           if (extensionRate) window._lastReservationForPopup.rate = extensionRate;
           showEditDeletePopup(window._lastReservationForPopup);
           window._lastReservationForPopup = null;
@@ -7851,7 +7786,7 @@ async function openExtendReservationModal(reservation) {
       const extensionData = validateExtensionData();
       if (!extensionData) return;
 
-      const { extensionNewDeparture, extensionSpecialOffer, extensionRate, extensionAmount } = extensionData;
+      const { extensionNewDeparture, extensionRate, extensionAmount } = extensionData;
 
       // Disable buttons during processing
       disableExtensionButtons();
@@ -7873,7 +7808,6 @@ async function openExtendReservationModal(reservation) {
       try {
         const extensionReceipt = await saveExtensionPayment(reservation, {
           newDeparture: extensionNewDeparture,
-          specialOffer: extensionSpecialOffer,
           rate: extensionRate,
           amount: extensionAmount,
           method: extensionMethodSelect.value || "cash"
@@ -7891,7 +7825,6 @@ async function openExtendReservationModal(reservation) {
         } else if (window._lastReservationForPopup) {
           // Return to edit reservation modal with updated data
           window._lastReservationForPopup.departureDate = extensionNewDeparture;
-          window._lastReservationForPopup.specialOffer = extensionSpecialOffer || window._lastReservationForPopup.specialOffer;
           if (extensionRate) window._lastReservationForPopup.rate = extensionRate;
           showEditDeletePopup(window._lastReservationForPopup);
           window._lastReservationForPopup = null;
@@ -7911,13 +7844,12 @@ async function openExtendReservationModal(reservation) {
 // Core logic for saving an extension with payment
 // Uses consistent variable naming throughout
 async function saveExtensionPayment(reservation, extensionData) {
-  const { newDeparture, specialOffer, rate, amount, method } = extensionData;
+  const { newDeparture, rate, amount, method } = extensionData;
   
   // Calculate nights for the extended reservation (from original arrival to new departure)
   const extensionTotalNights = calculateSpecialNights(
     reservation.arrivalDate, 
-    newDeparture, 
-    specialOffer || reservation.specialOffer
+    newDeparture
   );
   
   // Get current employee info
@@ -7927,8 +7859,7 @@ async function saveExtensionPayment(reservation, extensionData) {
   // UPDATE RESERVATION DATA
   // ─────────────────────────────────────────────────────────────────────────
   const extensionUpdateData = {
-    departureDate: newDeparture,
-    specialOffer: specialOffer || (reservation.specialOffer || "")
+    departureDate: newDeparture
   };
   
   // If a new rate is provided, it applies to the ENTIRE reservation
@@ -7945,7 +7876,6 @@ async function saveExtensionPayment(reservation, extensionData) {
     newDeparture: newDeparture,
     totalNights: extensionTotalNights,
     rate: rate || reservation.rate,
-    specialOffer: specialOffer || reservation.specialOffer,
     by: extensionEmployee.uid,
     byName: extensionEmployee.name,
     paymentAmount: amount,
@@ -7958,7 +7888,6 @@ async function saveExtensionPayment(reservation, extensionData) {
   
   // ── Update in-memory reservation object so subsequent extends see the new departure ──
   reservation.departureDate = newDeparture;
-  if (specialOffer) reservation.specialOffer = specialOffer;
   if (rate !== null && rate > 0) reservation.rate = rate;
   reservation.history = extensionHistory;
 
@@ -8076,7 +8005,6 @@ async function saveExtensionPayment(reservation, extensionData) {
       window._reservationsCache[cacheIndex] = { 
         ...window._reservationsCache[cacheIndex], 
         departureDate: newDeparture,
-        specialOffer: specialOffer || reservation.specialOffer,
         rate: rate || reservation.rate,
         history: extensionHistory
       };
@@ -8289,8 +8217,8 @@ function showCustomerListModal() {
         <div style="width:38px; height:38px; border-radius:50%; background:linear-gradient(135deg, var(--accent-primary), #2563eb);
           display:flex; align-items:center; justify-content:center; color:#fff; font-weight:700; font-size:0.75rem; flex-shrink:0;">${initials}</div>
         <div style="flex:1; min-width:0;">
-          <div style="font-weight:600; font-size:0.9rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--text-primary);">${c.name || 'Unknown'}</div>
-          <div style="font-size:0.78rem; color:var(--text-muted);">${c.telephone || 'No phone'}</div>
+          <div style="font-weight:600; font-size:0.9rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--text-primary);">${escapeHTML(c.name || 'Unknown')}</div>
+          <div style="font-size:0.78rem; color:var(--text-muted);">${escapeHTML(c.telephone || 'No phone')}</div>
         </div>
         <span class="material-icons" style="color:var(--text-muted); font-size:18px; flex-shrink:0;">chevron_right</span>
       `;
@@ -8337,13 +8265,13 @@ function showCustomerDetailsModal(customer) {
       <div style="width:64px; height:64px; border-radius:50%; background:linear-gradient(135deg, var(--accent-primary), #2563eb);
         display:flex; align-items:center; justify-content:center; color:#fff; font-weight:700; font-size:1.4rem;
         margin:0 auto 10px;">${initials}</div>
-      <h3 style="margin:0 0 2px;">${customer.name || 'Unknown'}</h3>
-      <span style="font-size:0.85em; color:var(--text-muted);">${customer.telephone || 'No phone'}</span>
+      <h3 style="margin:0 0 2px;">${escapeHTML(customer.name || 'Unknown')}</h3>
+      <span style="font-size:0.85em; color:var(--text-muted);">${escapeHTML(customer.telephone || 'No phone')}</span>
     </div>
     <div style="background:var(--bg-tertiary); border-radius:var(--radius-md); padding:12px 16px; margin-bottom:12px;">
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:0.85em;">
-        <div><span style="color:var(--text-muted);">Address</span><br/><strong>${customer.address || '—'}</strong></div>
-        <div><span style="color:var(--text-muted);">Email</span><br/><strong>${customer.email || '—'}</strong></div>
+        <div><span style="color:var(--text-muted);">Address</span><br/><strong>${escapeHTML(customer.address || '—')}</strong></div>
+        <div><span style="color:var(--text-muted);">Email</span><br/><strong>${escapeHTML(customer.email || '—')}</strong></div>
         <div><span style="color:var(--text-muted);">Reservations</span><br/><strong>${allRes.length}</strong></div>
         <div><span style="color:var(--text-muted);">Total Paid</span><br/><strong>$${totalPaid.toFixed(2)}</strong></div>
       </div>
@@ -8602,7 +8530,7 @@ function showReceiptDetailModal(payment, reservation) {
   let balance = 0;
   
   if (reservation) {
-    const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate, reservation.specialOffer);
+    const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate);
     const baseTotal = (parseFloat(reservation.rate) || 0) * nights;
     // Include balance adjustments
     const adjustments = reservation.balanceAdjustments || [];
@@ -8731,7 +8659,7 @@ function showReceiptDetailModal(payment, reservation) {
           const totalPaidAfterVoid = remainingPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
           
           // Calculate what's owed
-          const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate, reservation.specialOffer);
+          const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate);
           const baseTotal = (parseFloat(reservation.rate) || 0) * nights;
           const adjustments = reservation.balanceAdjustments || [];
           const totalAdjustment = adjustments.reduce((sum, adj) => {
@@ -8965,7 +8893,7 @@ async function showInHouseGuestsForExtend() {
         ">${roomNum}</div>
         <div style="flex:1; min-width:0;">
           <div style="font-weight:600; font-size:0.95rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-            ${guestName}
+            ${escapeHTML(guestName)}
           </div>
           <div style="font-size:0.8rem; color:var(--text-muted); margin-top:2px;">
             Checkout: ${checkout}
@@ -9132,7 +9060,7 @@ async function loadRoomHistory(roomNumber) {
       " onmouseover="this.style.borderColor='#8b5cf6'; this.style.boxShadow='0 2px 8px rgba(139,92,246,0.15)';"
          onmouseout="this.style.borderColor='var(--border-light)'; this.style.boxShadow='none';">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-          <span style="font-weight:700; font-size:0.95rem;">${guestName}</span>
+          <span style="font-weight:700; font-size:0.95rem;">${escapeHTML(guestName)}</span>
           ${statusBadge}
         </div>
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px 16px; font-size:0.82em; color:var(--text-muted);">
@@ -9247,7 +9175,7 @@ async function loadRoomHistory(roomNumber) {
     div.style.padding = "8px 12px";
     div.style.borderBottom = "1px solid #eee";
     div.innerHTML = `
-      <strong>${customer ? customer.name : "Unknown"}</strong> &nbsp; 
+      <strong>${escapeHTML(customer ? customer.name : "Unknown")}</strong> &nbsp; 
       <span>Room: ${r.roomNumber}</span> &nbsp; 
       <span>${type === "checkin" ? "Check-In" : "Check-Out"}: ${type === "checkin" ? r.arrivalDate : r.departureDate}</span> &nbsp; 
       <span>Duration: ${Math.max(1, Math.ceil((new Date(r.departureDate) - new Date(r.arrivalDate)) / (1000*60*60*24)))} nights</span>
@@ -9255,7 +9183,7 @@ async function loadRoomHistory(roomNumber) {
     div.onclick = () => {
       alert(
         `Reservation Info:\n` +
-        `Name: ${customer ? customer.name : "Unknown"}\n` +
+        `Name: ${escapeHTML(customer ? customer.name : "Unknown")}\n` +
         `Phone: ${customer ? customer.telephone : ""}\n` +
         `Room: ${r.roomNumber}\n` +
         `Check-In: ${r.arrivalDate}\n` +
@@ -9506,7 +9434,7 @@ document.getElementById("printReceiptsBtn")?.addEventListener("click", () => {
           // Use calculateSpecialNights for correct night count with special offers
           let nights = 1;
           try {
-            nights = calculateSpecialNights(arrivalRaw, departureRaw, reservation.specialOffer);
+            nights = calculateSpecialNights(arrivalRaw, departureRaw);
           } catch (e) {
             try {
               const a = new Date(arrivalRaw);
@@ -9730,7 +9658,7 @@ document.getElementById("generateReceiptsBtn")?.addEventListener("click", async 
       // Use calculateSpecialNights for correct night count with special offers
       let nights = 1;
       try {
-        nights = calculateSpecialNights(arrivalRaw, departureRaw, reservation.specialOffer);
+        nights = calculateSpecialNights(arrivalRaw, departureRaw);
       } catch (e) {
         try {
           const a = new Date(arrivalRaw);
@@ -9832,19 +9760,19 @@ function buildRegistrationFormHTML(reservation, customer, croppedImageDataURL, p
           <table style="width:100%; border-collapse:collapse; font-size:14px;">
             <tr>
               <td style="padding:4px 0; font-weight:bold; width:70px;">Guest:</td>
-              <td style="padding:4px 0; border-bottom:1px solid #ccc; font-size:15px;">${customer.name}</td>
+              <td style="padding:4px 0; border-bottom:1px solid #ccc; font-size:15px;">${escapeHTML(customer.name)}</td>
             </tr>
             <tr>
               <td style="padding:4px 0; font-weight:bold;">Address:</td>
-              <td style="padding:4px 0; border-bottom:1px solid #ccc;">${customer.address}</td>
+              <td style="padding:4px 0; border-bottom:1px solid #ccc;">${escapeHTML(customer.address)}</td>
             </tr>
             <tr>
               <td style="padding:4px 0; font-weight:bold;">Phone:</td>
-              <td style="padding:4px 0; border-bottom:1px solid #ccc;">${customer.telephone}</td>
+              <td style="padding:4px 0; border-bottom:1px solid #ccc;">${escapeHTML(customer.telephone)}</td>
             </tr>
             <tr>
               <td style="padding:4px 0; font-weight:bold;">Email:</td>
-              <td style="padding:4px 0; border-bottom:1px solid #ccc;">${customer.email || 'N/A'}</td>
+              <td style="padding:4px 0; border-bottom:1px solid #ccc;">${escapeHTML(customer.email || 'N/A')}</td>
             </tr>
             <tr>
               <td style="padding:4px 0; font-weight:bold;">Room:</td>
@@ -9956,7 +9884,7 @@ function buildRegistrationFormHTML(reservation, customer, croppedImageDataURL, p
         </div>
         
         <div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:4px;">
-          <div><strong>Guest:</strong> ${customer.name}</div>
+          <div><strong>Guest:</strong> ${escapeHTML(customer.name)}</div>
           <div><strong>Room:</strong> ${room}</div>
           <div><strong>Date:</strong> ${receiptDate}</div>
         </div>
@@ -10057,7 +9985,7 @@ function buildRegistrationFormHTML(reservation, customer, croppedImageDataURL, p
 
         <div style="margin-bottom:16px; padding:12px; background:#f8f9fa; border-radius:6px; border:1px solid #dee2e6;">
           <div style="display:flex; justify-content:space-between; font-size:14px;">
-            <div><strong>Guest: </strong> ${customer.name}</div>
+            <div><strong>Guest: </strong> ${escapeHTML(customer.name)}</div>
             <div><strong>Room:</strong> ${room}</div>
             <div><strong>Stay:</strong> ${arrival} to ${departure}</div>
           </div>
@@ -10090,7 +10018,7 @@ function buildRegistrationFormHTML(reservation, customer, croppedImageDataURL, p
         <div style="margin-top:25px;">
           <h4 style="margin:0 0 10px 0; font-size:14px;">Additional Notes:</h4>
           <div style="border: 1px solid #ccc; min-height:80px; padding: 10px; border-radius:4px; background: white;">
-            ${reservation.note || '<em style="color:#999;">No additional notes</em>'}
+            ${reservation.note ? escapeHTML(reservation.note) : '<em style="color:#999;">No additional notes</em>'}
           </div>
         </div>
 
@@ -10128,7 +10056,7 @@ function showCheckInConfirmationPopup(reservation, customer, receiptNumber, amou
   const total = (parseFloat(amountPaid) + parseFloat(balance)).toFixed(2);
 
   content.innerHTML = `
-    <p><strong>Guest:</strong> ${customer.name}</p>
+    <p><strong>Guest:</strong> ${escapeHTML(customer.name)}</p>
     <p><strong>Room:</strong> ${reservation.roomNumber}</p>
     <p><strong>Check-In Date:</strong> ${formatDateDMY(reservation.arrivalDate)}</p>
     <p><strong>Check-Out Date:</strong> ${formatDateDMY(reservation.departureDate)}</p>
@@ -10295,8 +10223,7 @@ function generateInvoiceHTML(customer, reservation, selectedPayments, totalCost)
         <tr><td><strong>Total Amount</strong></td><td>$${totalCost.toFixed(2)}</td></tr>
         <tr><td><strong>Total Paid</strong></td><td>$${totalPaid.toFixed(2)}</td></tr>
         <tr><td><strong>Balance Due</strong></td><td>$${balance.toFixed(2)}</td></tr>
-        <tr><td><strong>Special Offer</strong></td><td>${reservation.specialOffer || 'None'}</td></tr>
-        <tr><td><strong>Notes</strong></td><td>${reservation.note || 'None'}</td></tr>
+        <tr><td><strong>Notes</strong></td><td>${escapeHTML(reservation.note || 'None')}</td></tr>
 
       </table>
 
@@ -10328,72 +10255,27 @@ function generateInvoiceHTML(customer, reservation, selectedPayments, totalCost)
 // ===========================================================================
 // SPECIAL OFFERS - Night Calculation
 // ===========================================================================
-// The guesthouse has special offers where guests get free nights:
-//   - "2plus1" = Pay for 2 nights, get 1 free (3 night stay)
-//   - "4plus3" = Pay for 4 nights, get 3 free (7 night stay)
-// This function calculates how many nights the guest actually PAYS for
+// Calculate the number of nights for a stay
+// ===========================================================================
 
 function calculateSpecialNights(arrival, departure, offer) {
-  // Calculate total nights of the stay
+  // Calculate total nights of the stay (offer parameter kept for backward compatibility but not used)
   const start = new Date(arrival);
   const end = new Date(departure);
-  let nights = Math.max(1, Math.ceil((end - start) / (1000 * 60 * 60 * 24)));
-
-  // Apply special offer discounts
-  if (offer === "2plus1") {
-    // Every 3 nights, 1 is free. So for 3 nights, charge 2. For 6 nights, charge 4.
-    const paidBlocks = Math.floor(nights / 3);
-    nights = nights - paidBlocks;
-    
-  } else if (offer === "4plus3") {
-    // Every 7 nights, 3 are free. So for 7 nights, charge 4. For 14 nights, charge 8.
-    const paidBlocks = Math.floor(nights / 7);
-    nights = nights - (paidBlocks * 3);
-  }
-
-  return nights;
+  return Math.max(1, Math.ceil((end - start) / (1000 * 60 * 60 * 24)));
 }
 
-// When user selects a special offer, auto-fill the departure date
+// When user selects arrival date, auto-calculate departure display
 function getAdjustedDepartureDate(arrivalDate, offerCode) {
-  const start = new Date(arrivalDate);
-  switch (offerCode) {
-    case "2plus1":
-      start.setDate(start.getDate() + 3);  // 3 night minimum for 2+1
-      break;
-    case "4plus3":
-      start.setDate(start.getDate() + 7);  // 7 night minimum for 4+3
-      break;
-    default:
-      return null;
-  }
-  return start.toISOString().split("T")[0];
+  return null; // No longer used
 }
 
-// Auto-fill departure date when special offer is selected
-document.getElementById("specialOffer")?.addEventListener("change", () => {
-  const arrivalDate = document.getElementById("arrival").value;
-  const selected = document.getElementById("specialOffer").value;
-  if (arrivalDate && selected) {
-    const autoDep = getAdjustedDepartureDate(arrivalDate, selected);
-    if (autoDep) {
-      document.getElementById("departure").value = autoDep;
-    }
-  }
-});
-
-// For extending stays - check if extension matches special offer requirements
+// For extending stays - validate extension length
 function calculateSpecialNightsForExtension(currentDeparture, newDeparture, offer) {
   const start = new Date(currentDeparture);
   const end = new Date(newDeparture);
   const diff = Math.ceil((end - start) / (1000 * 60 * 60 * 24));
-
-  // Special offers require specific extension lengths
-  if (offer === "2plus1") return diff === 3;  // Must extend by exactly 3 nights
-  if (offer === "4plus3") return diff === 7;  // Must extend by exactly 7 nights
-  
-  // No offer or standard rate - any extension length is valid
-  return true;
+  return diff > 0; // Any positive extension is valid
 }
 {
   const summaryBtn = document.getElementById("summaryBtn");
@@ -10552,8 +10434,7 @@ async function loadSummary(startDate, endDate, range) {
 
     const nights = calculateSpecialNights(
       reservation.arrivalDate,
-      reservation.departureDate,
-      reservation.specialOffer
+      reservation.departureDate
     );
     const rate = parseFloat(reservation.rate) || 0;
     const baseTotal = rate * nights;
@@ -10633,7 +10514,7 @@ async function loadSummary(startDate, endDate, range) {
     }
     
     // Truncate notes if too long
-    let notes = reservation.note || reservation.notes || "—";
+    let notes = escapeHTML(reservation.note || reservation.notes || "—");
     if (notes.length > 30) {
       notes = notes.substring(0, 30) + "...";
     }
@@ -10660,7 +10541,7 @@ async function loadSummary(startDate, endDate, range) {
       </td>
       <td style="font-size:0.85em;">${allReceipts}</td>
       <td style="font-size:0.85em;">${creatorName}</td>
-      <td style="font-size:0.85em;max-width:150px;overflow:hidden;text-overflow:ellipsis;" title="${reservation.note || ''}">${notes}</td>
+      <td style="font-size:0.85em;max-width:150px;overflow:hidden;text-overflow:ellipsis;" title="${escapeHTML(reservation.note || '')}">${notes}</td>
     `;
     tbody.appendChild(tr);
 
@@ -10789,7 +10670,7 @@ async function fillDashboard() {
   const activeReservations = reservations.filter(r => r.departureDate >= today);
   
   for (const reservation of activeReservations) {
-    const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate, reservation.specialOffer);
+    const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate);
     const rate = parseFloat(reservation.rate) || 0;
     const baseTotal = rate * nights;
     
@@ -11388,7 +11269,7 @@ async function openPrintRegistrationForm(reservation) {
 
   const sortedPayments = relatedPayments.sort((a, b) => (b.timestamp || "").localeCompare(a.timestamp || ""));
   const rate = parseFloat(freshReservation.rate || 0);
-  const nights = calculateSpecialNights(freshReservation.arrivalDate, freshReservation.departureDate, freshReservation.specialOffer);
+  const nights = calculateSpecialNights(freshReservation.arrivalDate, freshReservation.departureDate);
   const baseTotal = rate * nights;
   // Include balance adjustments
   const adjustments = freshReservation.balanceAdjustments || [];
@@ -11438,7 +11319,7 @@ async function showRegistrationFormWithSavedId(customer) {
       .filter(p => p.reservationId === reservation.id && !p.voided);
 
     const sortedPayments = relatedPayments.sort((a, b) => (b.timestamp || "").localeCompare(a.timestamp || ""));
-    const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate, reservation.specialOffer);
+    const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate);
     const baseTotal = (parseFloat(reservation.rate) || 0) * nights;
     // Include balance adjustments
     const adjustments = reservation.balanceAdjustments || [];
@@ -11492,8 +11373,7 @@ async function showFormPreview(reservation, customer, idImageUrl) {
   const rate = parseFloat(freshReservation.rate || 0);
   const nights = calculateSpecialNights(
     freshReservation.arrivalDate,
-    freshReservation.departureDate,
-    freshReservation.specialOffer
+    freshReservation.departureDate
   );
   const baseTotal = rate * nights;
   // Include balance adjustments
