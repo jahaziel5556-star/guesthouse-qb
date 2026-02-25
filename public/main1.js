@@ -9033,9 +9033,11 @@ async function loadRoomHistory(roomNumber) {
     const checkInDisplay = checkInTime ? formatDateTimeDMY(checkInTime) : (isCheckedIn ? 'Yes' : '—');
     const checkOutDisplay = checkOutTime ? formatDateTimeDMY(checkOutTime) : (isCheckedOut ? 'Yes' : '—');
 
-    // Status badge
+    // Status badge — distinguish manual vs auto checkout
     let statusBadge = '';
-    if (isCheckedOut) {
+    if (isCheckedOut && res.autoCheckedOut) {
+      statusBadge = '<span style="background:#9333ea; color:#fff; padding:2px 8px; border-radius:12px; font-size:0.7em; font-weight:600;" title="System auto-checkout">Auto Checked Out</span>';
+    } else if (isCheckedOut) {
       statusBadge = '<span style="background:#dc2626; color:#fff; padding:2px 8px; border-radius:12px; font-size:0.7em; font-weight:600;">Checked Out</span>';
     } else if (isCheckedIn) {
       statusBadge = '<span style="background:#16a34a; color:#fff; padding:2px 8px; border-radius:12px; font-size:0.7em; font-weight:600;">In-House</span>';
@@ -11087,6 +11089,121 @@ window.updateRevenueChartWithRange = function(range, customStart, customEnd) {
   }
 };
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// AUTO-CHECKOUT: Automatically check out overdue guests
+// ═══════════════════════════════════════════════════════════════════════════════
+// Runs on app load and every 30 minutes.
+// If a guest's departure date has passed and they haven't been checked out,
+// the system marks them as checked out automatically.
+// This keeps Room History, Extend Stay, and the dashboard consistent.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Auto-checkout guests whose departure date is strictly before today.
+ * Sets checkedOut, actualCheckOutTime, and an autoCheckedOut flag
+ * so staff can see the system did it (not a manual checkout).
+ * @returns {number} Number of guests auto-checked-out
+ */
+async function autoCheckoutOverdueGuests() {
+  try {
+    const today = getTodayLocal(); // YYYY-MM-DD
+
+    // Use cache if available, otherwise fetch
+    let reservations = window._reservationsCache || [];
+    if (reservations.length === 0) {
+      const snapshot = await getDocs(collection(db, "reservations"));
+      reservations = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+    }
+
+    // Find overdue guests: checked in, NOT checked out, departure < today
+    const overdueGuests = reservations.filter(r => {
+      const isCheckedIn = r.checkedIn || !!r.actualCheckInTime;
+      const isCheckedOut = !!r.checkedOut;
+      const depDate = r.departureDate || '';
+      return isCheckedIn && !isCheckedOut && depDate < today && depDate !== '';
+    });
+
+    if (overdueGuests.length === 0) {
+      Logger.debug('Auto-checkout: no overdue guests found');
+      return 0;
+    }
+
+    Logger.info(`Auto-checkout: found ${overdueGuests.length} overdue guest(s), processing...`);
+
+    let checkedOutCount = 0;
+
+    for (const res of overdueGuests) {
+      try {
+        // Re-fetch to avoid race conditions (another tab may have checked them out)
+        const freshDoc = await getDoc(doc(db, 'reservations', res.id));
+        if (!freshDoc.exists()) continue;
+        const freshData = freshDoc.data();
+        if (freshData.checkedOut) {
+          Logger.debug(`Auto-checkout: ${res.id} already checked out by another process`);
+          continue;
+        }
+
+        // Build the auto-checkout timestamp at the scheduled checkout time (1 PM on departure day)
+        const checkoutTimestamp = `${res.departureDate}T13:00:00`;
+
+        await updateDoc(doc(db, 'reservations', res.id), {
+          checkedOut: true,
+          actualCheckOutTime: checkoutTimestamp,
+          autoCheckedOut: true,
+          autoCheckoutNote: `Automatically checked out — departure date ${res.departureDate} has passed`
+        });
+
+        // Update local cache immediately for consistency
+        if (window._reservationsCache) {
+          const idx = window._reservationsCache.findIndex(r => r.id === res.id);
+          if (idx !== -1) {
+            window._reservationsCache[idx] = {
+              ...window._reservationsCache[idx],
+              checkedOut: true,
+              actualCheckOutTime: checkoutTimestamp,
+              autoCheckedOut: true
+            };
+          }
+        }
+
+        // Find customer name for audit log
+        const customer = customers.find(c => c.id === res.customerId);
+        const guestName = customer?.name || res.customerName || 'Unknown';
+
+        // Audit log
+        await auditLog(AUDIT_ACTIONS.CHECKOUT || 'CHECKOUT', {
+          roomNumber: res.roomNumber,
+          customerName: guestName,
+          reservationId: res.id,
+          scheduledDeparture: res.departureDate,
+          actualCheckout: res.departureDate,
+          autoCheckout: true,
+          reason: 'Departure date passed — system auto-checkout'
+        }, 'reservation', res.id);
+
+        checkedOutCount++;
+        Logger.info(`Auto-checkout: Room ${res.roomNumber} (${guestName}) — departed ${res.departureDate}`);
+      } catch (err) {
+        console.error(`Auto-checkout failed for reservation ${res.id}:`, err);
+      }
+    }
+
+    if (checkedOutCount > 0) {
+      Logger.success(`Auto-checkout complete: ${checkedOutCount} guest(s) checked out`);
+      // Refresh dashboard to reflect changes
+      debouncedDashboardUpdate();
+    }
+
+    return checkedOutCount;
+  } catch (err) {
+    console.error('Auto-checkout error:', err);
+    return 0;
+  }
+}
+
+// Run auto-checkout every 30 minutes to catch any guests past their departure
+setInterval(autoCheckoutOverdueGuests, 30 * 60 * 1000);
+
 // call it once your app is ready (after customers/reservations loaded)
 (async () => {
   try {
@@ -11097,8 +11214,12 @@ window.updateRevenueChartWithRange = function(range, customStart, customEnd) {
     
     // Wait for DOM to be ready before filling dashboard
     if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', () => fillDashboard());
+      document.addEventListener('DOMContentLoaded', async () => {
+        await autoCheckoutOverdueGuests();
+        await fillDashboard();
+      });
     } else {
+      await autoCheckoutOverdueGuests();
       await fillDashboard();
     }
   } catch (err) {
