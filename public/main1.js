@@ -1780,7 +1780,7 @@ async function retryQuickBooksQueue() {
       continue;
     }
     
-    // Check if this payment was already synced (by receipt number)
+    // Check if this payment was already synced or voided (by receipt number)
     if (item.receiptNumber) {
       try {
         const paymentsSnapshot = await getDocs(
@@ -1789,7 +1789,11 @@ async function retryQuickBooksQueue() {
         const existingPayment = paymentsSnapshot.docs[0]?.data();
         if (existingPayment?.qbSyncStatus === 'synced') {
           Logger.debug(`Receipt #${item.receiptNumber} already synced - removing from queue`);
-          continue; // Don't add to stillPending, effectively removing from queue
+          continue;
+        }
+        if (existingPayment?.voided || existingPayment?.qbSyncStatus === 'voided') {
+          Logger.debug(`Receipt #${item.receiptNumber} is voided - removing from queue`);
+          continue;
         }
       } catch (e) {
         Logger.warn('Could not check sync status:', e);
@@ -1855,6 +1859,9 @@ function buildQuickBooksPaymentData(payment, reservation, customer, employee = n
   };
 }
 
+// Global lock to prevent concurrent QB sync operations across bulk functions
+let _qbSyncInProgress = false;
+
 async function pushToQuickBooks(paymentData, paymentId = null, skipDuplicateCheck = false) {
   if (!paymentData || !paymentData.name || !paymentData.amount) {
     console.error("Cannot push to QuickBooks: missing required fields (name, amount)", paymentData);
@@ -1866,13 +1873,13 @@ async function pushToQuickBooks(paymentData, paymentId = null, skipDuplicateChec
     try {
       const paymentDoc = await getDoc(doc(db, "payments", paymentId));
       if (paymentDoc.exists()) {
-        const paymentData = paymentDoc.data();
-        if (paymentData.qbSyncStatus === 'synced') {
-          console.log(`📝 Receipt #${paymentData.receiptNumber || paymentId} already synced to QuickBooks - skipping`);
+        const existingPayment = paymentDoc.data();
+        if (existingPayment.qbSyncStatus === 'synced') {
+          console.log(`📝 Receipt #${existingPayment.receiptNumber || paymentId} already synced to QuickBooks - skipping`);
           return { success: true, alreadySynced: true, message: 'Already synced to QuickBooks' };
         }
-        if (paymentData.voided || paymentData.qbSyncStatus === 'voided') {
-          console.log(`🚫 Receipt #${paymentData.receiptNumber || paymentId} is voided - will not send to QuickBooks`);
+        if (existingPayment.voided || existingPayment.qbSyncStatus === 'voided') {
+          console.log(`🚫 Receipt #${existingPayment.receiptNumber || paymentId} is voided - will not send to QuickBooks`);
           return { success: false, voided: true, message: 'Payment is voided — not sent to QuickBooks' };
         }
       }
@@ -1987,6 +1994,12 @@ async function retryFailedQBSyncsFromFirestore() {
     Logger.info(`Found ${failedPayments.length} pending QuickBooks sync(s)...`);
     
     for (const payment of failedPayments) {
+      // Skip voided payments — should never be sent to QB
+      if (payment.voided || payment.qbSyncStatus === 'voided') {
+        Logger.debug(`Receipt #${payment.receiptNumber} is voided - skipping retry`);
+        continue;
+      }
+      
       // Skip if already synced (double-check to prevent race conditions)
       if (payment.qbSyncStatus === 'synced') {
         Logger.debug(`Receipt #${payment.receiptNumber} already synced - skipping`);
@@ -2078,6 +2091,13 @@ async function bulkResyncToQuickBooks(lastSentReceiptNumber = 0) {
     return;
   }
 
+  // Prevent concurrent sync operations
+  if (_qbSyncInProgress) {
+    alert("A QuickBooks sync is already in progress. Please wait for it to finish.");
+    return;
+  }
+  _qbSyncInProgress = true;
+
   try {
     // Get all payments from Firestore
     const paymentsSnapshot = await getDocs(collection(db, "payments"));
@@ -2085,13 +2105,8 @@ async function bulkResyncToQuickBooks(lastSentReceiptNumber = 0) {
     
     // Filter payments with receipt numbers > lastSentReceiptNumber that aren't synced
     const unsentPayments = allPayments.filter(p => {
-      // Skip voided payments
       if (p.voided) return false;
-      
-      // Get numeric receipt number
       const receiptNum = parseInt(p.receiptNumber?.replace(/\D/g, '') || '0', 10);
-      
-      // Include if receipt number > last sent AND not already synced
       return receiptNum > lastSentReceiptNumber && p.qbSyncStatus !== 'synced';
     });
 
@@ -2112,30 +2127,44 @@ async function bulkResyncToQuickBooks(lastSentReceiptNumber = 0) {
     
     if (!confirm(confirmMsg)) return;
 
-    // Show progress
     let successCount = 0;
     let failCount = 0;
+    let skippedCount = 0;
     const results = [];
 
     for (const payment of unsentPayments) {
+      // Re-fetch before each send to prevent duplicates (another tab may have synced it)
       try {
-        // Get reservation if available
+        const freshDoc = await getDoc(doc(db, "payments", payment.id));
+        if (freshDoc.exists()) {
+          const freshData = freshDoc.data();
+          if (freshData.qbSyncStatus === 'synced') {
+            skippedCount++;
+            results.push(`⏭️ ${payment.receiptNumber} (already synced)`);
+            continue;
+          }
+          if (freshData.voided || freshData.qbSyncStatus === 'voided') {
+            skippedCount++;
+            results.push(`⏭️ ${payment.receiptNumber} (voided)`);
+            continue;
+          }
+        }
+      } catch (e) {
+        console.warn(`Could not re-check payment ${payment.receiptNumber}:`, e);
+      }
+
+      try {
         let reservation = null;
         if (payment.reservationId) {
           const reservationSnap = await getDoc(doc(db, "reservations", payment.reservationId));
           reservation = reservationSnap.exists() ? { id: reservationSnap.id, ...reservationSnap.data() } : null;
         }
 
-        // Get customer
         const customer = customers.find(c => c.id === payment.customerId) || null;
-
-        // Build complete payment data
         const qbData = buildQuickBooksPaymentData(payment, reservation, customer);
 
-        // Send to QuickBooks
         await sendToQuickBooks(qbData);
 
-        // Update Firestore status
         await updateDoc(doc(db, "payments", payment.id), {
           qbSyncStatus: 'synced',
           qbSyncedAt: new Date().toISOString(),
@@ -2147,24 +2176,34 @@ async function bulkResyncToQuickBooks(lastSentReceiptNumber = 0) {
         console.log(`✅ Synced receipt ${payment.receiptNumber} to QuickBooks`);
 
       } catch (err) {
-        failCount++;
-        results.push(`❌ ${payment.receiptNumber}: ${err.message}`);
-        console.error(`❌ Failed to sync receipt ${payment.receiptNumber}:`, err);
+        const errMsg = err.message || '';
+        // If QB says receipt already exists, mark as synced (it got through before)
+        if (/already exists|Duplicate|DocNumber/i.test(errMsg)) {
+          await updateDoc(doc(db, "payments", payment.id), {
+            qbSyncStatus: 'synced',
+            qbSyncedAt: new Date().toISOString(),
+            qbSyncError: null,
+            qbSyncNote: 'Already existed in QuickBooks'
+          });
+          successCount++;
+          results.push(`✅ ${payment.receiptNumber} (already in QB)`);
+        } else {
+          failCount++;
+          results.push(`❌ ${payment.receiptNumber}: ${errMsg}`);
+          console.error(`❌ Failed to sync receipt ${payment.receiptNumber}:`, err);
 
-        // Update Firestore with error
-        await updateDoc(doc(db, "payments", payment.id), {
-          qbSyncStatus: 'failed',
-          qbSyncError: err.message || 'Unknown error',
-          qbLastAttempt: new Date().toISOString()
-        });
+          await updateDoc(doc(db, "payments", payment.id), {
+            qbSyncStatus: 'failed',
+            qbSyncError: errMsg || 'Unknown error',
+            qbLastAttempt: new Date().toISOString()
+          });
+        }
       }
     }
 
-    // Show results
-    const summary = `Bulk Resync Complete!\n\n✅ Success: ${successCount}\n❌ Failed: ${failCount}\n\nDetails:\n${results.join('\n')}`;
+    const summary = `Bulk Resync Complete!\n\n✅ Success: ${successCount}\n❌ Failed: ${failCount}\n⏭️ Skipped: ${skippedCount}\n\nDetails:\n${results.join('\n')}`;
     alert(summary);
 
-    // Refresh UI if needed
     if (typeof loadPaymentsForReservation === 'function' && window.currentReservation) {
       loadPaymentsForReservation(window.currentReservation);
     }
@@ -2172,6 +2211,8 @@ async function bulkResyncToQuickBooks(lastSentReceiptNumber = 0) {
   } catch (err) {
     console.error("Bulk resync error:", err);
     alert(`Bulk resync failed: ${err.message}`);
+  } finally {
+    _qbSyncInProgress = false;
   }
 }
 
@@ -2184,6 +2225,13 @@ window.bulkResyncToQuickBooks = bulkResyncToQuickBooks;
  * Prevents duplicates by checking qbSyncStatus before sending
  */
 async function sendUnsentToQuickBooks() {
+  // Prevent concurrent sync operations
+  if (_qbSyncInProgress) {
+    alert("A QuickBooks sync is already in progress. Please wait for it to finish.");
+    return { success: false, error: 'Sync already in progress' };
+  }
+  _qbSyncInProgress = true;
+
   try {
     // Get all payments from Firestore
     const paymentsSnapshot = await getDocs(collection(db, "payments"));
@@ -2193,7 +2241,7 @@ async function sendUnsentToQuickBooks() {
     const unsentPayments = allPayments.filter(p => {
       if (p.voided) return false;
       if (p.qbSyncStatus === 'synced') return false;
-      return true; // pending, failed, queued, or no status
+      return true;
     });
 
     if (unsentPayments.length === 0) {
@@ -2203,14 +2251,14 @@ async function sendUnsentToQuickBooks() {
 
     // Sort by receipt number for orderly processing
     unsentPayments.sort((a, b) => {
-      const numA = parseInt(a.receiptNumber?.replace(/\\D/g, '') || '0', 10);
-      const numB = parseInt(b.receiptNumber?.replace(/\\D/g, '') || '0', 10);
+      const numA = parseInt(a.receiptNumber?.replace(/\D/g, '') || '0', 10);
+      const numB = parseInt(b.receiptNumber?.replace(/\D/g, '') || '0', 10);
       return numA - numB;
     });
 
     const receiptList = unsentPayments.slice(0, 10).map(p => p.receiptNumber).join(', ');
     const moreText = unsentPayments.length > 10 ? `...and ${unsentPayments.length - 10} more` : '';
-    const confirmMsg = `Found ${unsentPayments.length} unsent receipt(s):\\n${receiptList}${moreText}\\n\\nSend to QuickBooks?`;
+    const confirmMsg = `Found ${unsentPayments.length} unsent receipt(s):\n${receiptList}${moreText}\n\nSend to QuickBooks?`;
     
     if (!confirm(confirmMsg)) return { success: false, cancelled: true };
 
@@ -2219,31 +2267,32 @@ async function sendUnsentToQuickBooks() {
     let skippedCount = 0;
 
     for (const payment of unsentPayments) {
-      // Double-check it's not already synced (race condition protection)
+      // Re-fetch: check synced AND voided before each send
       const freshPayment = await getDoc(doc(db, "payments", payment.id));
-      if (freshPayment.exists() && freshPayment.data().qbSyncStatus === 'synced') {
-        skippedCount++;
-        continue;
+      if (freshPayment.exists()) {
+        const freshData = freshPayment.data();
+        if (freshData.qbSyncStatus === 'synced') {
+          skippedCount++;
+          continue;
+        }
+        if (freshData.voided || freshData.qbSyncStatus === 'voided') {
+          skippedCount++;
+          continue;
+        }
       }
 
       try {
-        // Get reservation if available
         let reservation = null;
         if (payment.reservationId) {
           const reservationSnap = await getDoc(doc(db, "reservations", payment.reservationId));
           reservation = reservationSnap.exists() ? { id: reservationSnap.id, ...reservationSnap.data() } : null;
         }
 
-        // Get customer
         const customer = customers.find(c => c.id === payment.customerId) || null;
-
-        // Build complete payment data
         const qbData = buildQuickBooksPaymentData(payment, reservation, customer);
 
-        // Send to QuickBooks (skip duplicate check since we already checked)
         await sendToQuickBooks(qbData);
 
-        // Update Firestore status
         await updateDoc(doc(db, "payments", payment.id), {
           qbSyncStatus: 'synced',
           qbSyncedAt: new Date().toISOString(),
@@ -2253,20 +2302,30 @@ async function sendUnsentToQuickBooks() {
         successCount++;
 
       } catch (err) {
-        failCount++;
-        console.error(`❌ Failed to sync receipt ${payment.receiptNumber}:`, err);
+        const errMsg = err.message || '';
+        // If QB says receipt already exists, mark as synced
+        if (/already exists|Duplicate|DocNumber/i.test(errMsg)) {
+          await updateDoc(doc(db, "payments", payment.id), {
+            qbSyncStatus: 'synced',
+            qbSyncedAt: new Date().toISOString(),
+            qbSyncError: null,
+            qbSyncNote: 'Already existed in QuickBooks'
+          });
+          successCount++;
+        } else {
+          failCount++;
+          console.error(`❌ Failed to sync receipt ${payment.receiptNumber}:`, err);
 
-        // Update Firestore with error
-        await updateDoc(doc(db, "payments", payment.id), {
-          qbSyncStatus: 'failed',
-          qbSyncError: err.message || 'Unknown error',
-          qbLastAttempt: new Date().toISOString()
-        });
+          await updateDoc(doc(db, "payments", payment.id), {
+            qbSyncStatus: 'failed',
+            qbSyncError: errMsg || 'Unknown error',
+            qbLastAttempt: new Date().toISOString()
+          });
+        }
       }
     }
 
-    // Show results
-    const message = `QuickBooks Sync Complete!\\n\\n✅ Sent: ${successCount}\\n❌ Failed: ${failCount}\\n⏭️ Skipped (already synced): ${skippedCount}`;
+    const message = `QuickBooks Sync Complete!\n\n✅ Sent: ${successCount}\n❌ Failed: ${failCount}\n⏭️ Skipped: ${skippedCount}`;
     alert(message);
     showToast(`✅ ${successCount} receipts sent to QuickBooks`, 'success');
 
@@ -2276,6 +2335,8 @@ async function sendUnsentToQuickBooks() {
     console.error("Send unsent to QB error:", err);
     alert(`Failed to send receipts: ${err.message}`);
     return { success: false, error: err.message };
+  } finally {
+    _qbSyncInProgress = false;
   }
 }
 
