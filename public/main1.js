@@ -1583,6 +1583,9 @@ const MIN_UPDATE_INTERVAL = 500; // Don't update more than twice per second
  * - Prevents multiple simultaneous updates
  */
 function debouncedDashboardUpdate() {
+  // Skip updates while auto-checkout is running (prevents spam)
+  if (window._suppressDashboardUpdates) return;
+
   // Clear any pending update
   if (dashboardUpdateTimeout) clearTimeout(dashboardUpdateTimeout);
   
@@ -11130,6 +11133,9 @@ async function autoCheckoutOverdueGuests() {
 
     Logger.info(`Auto-checkout: found ${overdueGuests.length} overdue guest(s), processing...`);
 
+    // Suppress dashboard updates during batch processing to prevent spam
+    window._suppressDashboardUpdates = true;
+
     let checkedOutCount = 0;
 
     for (const res of overdueGuests) {
@@ -11188,14 +11194,18 @@ async function autoCheckoutOverdueGuests() {
       }
     }
 
+    // Re-enable dashboard updates
+    window._suppressDashboardUpdates = false;
+
     if (checkedOutCount > 0) {
       Logger.success(`Auto-checkout complete: ${checkedOutCount} guest(s) checked out`);
-      // Refresh dashboard to reflect changes
+      // Single dashboard refresh after all updates are done
       debouncedDashboardUpdate();
     }
 
     return checkedOutCount;
   } catch (err) {
+    window._suppressDashboardUpdates = false;
     console.error('Auto-checkout error:', err);
     return 0;
   }
