@@ -8773,21 +8773,24 @@ async function showInHouseGuestsForExtend() {
     }
   }
 
-  // Calculate date boundaries: today and yesterday
+  // Calculate date boundaries: yesterday through 3 days ahead
   const today = getTodayLocal(); // YYYY-MM-DD
   const yesterdayDate = new Date();
   yesterdayDate.setDate(yesterdayDate.getDate() - 1);
-  const yesterday = yesterdayDate.toISOString().split('T')[0]; // YYYY-MM-DD
+  const yesterday = yesterdayDate.toISOString().split('T')[0];
+  const threeDaysAhead = new Date();
+  threeDaysAhead.setDate(threeDaysAhead.getDate() + 3);
+  const maxDate = threeDaysAhead.toISOString().split('T')[0];
 
-  // Filter: checked in, not checked out, AND departure date is today or yesterday
+  // Filter: checked in, not checked out, departure from yesterday to 3 days ahead
   const inHouseGuests = reservations.filter(r => {
     const isCheckedIn = r.checkedIn || !!r.actualCheckInTime;
     const isCheckedOut = !!r.checkedOut;
     if (!isCheckedIn || isCheckedOut) return false;
-    
-    // Only show guests whose departure is today or yesterday (eligible for extension)
+
+    // Show guests whose departure is yesterday (overdue) through 3 days from now
     const depDate = r.departureDate || '';
-    return depDate >= yesterday && depDate <= today;
+    return depDate >= yesterday && depDate <= maxDate;
   });
 
   if (inHouseGuests.length === 0) {
@@ -8814,6 +8817,24 @@ async function showInHouseGuestsForExtend() {
     const checkout = res.departureDate ? formatDateDMY(res.departureDate) : '—';
     const roomNum = res.roomNumber || '—';
 
+    // Determine checkout urgency label
+    const depDate = res.departureDate || '';
+    let statusLabel = '';
+    let statusColor = 'var(--text-muted)';
+    if (depDate < today) {
+      statusLabel = 'Overdue';
+      statusColor = 'var(--accent-danger)';
+    } else if (depDate === today) {
+      statusLabel = 'Today';
+      statusColor = 'var(--accent-warning, #f59e0b)';
+    } else {
+      // Future: calculate days until checkout
+      const diffMs = new Date(depDate) - new Date(today);
+      const diffDays = Math.round(diffMs / 86400000);
+      statusLabel = diffDays === 1 ? 'Tomorrow' : `In ${diffDays} days`;
+      statusColor = 'var(--accent-primary)';
+    }
+
     html += `
       <button class="in-house-guest-card" data-res-id="${res.id}" style="
         display:flex; align-items:center; gap:12px; padding:14px 16px;
@@ -8835,6 +8856,7 @@ async function showInHouseGuestsForExtend() {
           </div>
           <div style="font-size:0.8rem; color:var(--text-muted); margin-top:2px;">
             Checkout: ${checkout}
+            <span style="margin-left:6px; font-weight:600; color:${statusColor};">&bull; ${statusLabel}</span>
           </div>
         </div>
         <span class="material-icons" style="color:var(--accent-success); font-size:22px; flex-shrink:0;">update</span>
