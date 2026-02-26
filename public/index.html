@@ -90,2753 +90,37 @@
   <!-- Chart.js: Used for revenue/analytics charts -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
 
-  <style>
-    /*
-     * =============================================================================
-     * CSS VARIABLES - Design System Tokens
-     * =============================================================================
-     * 
-     * These variables define the visual design system for the entire app.
-     * Using CSS custom properties allows:
-     * - Easy theme switching (light/dark mode)
-     * - Consistent styling across components
-     * - Single source of truth for design values
-     * 
-     * NAMING CONVENTION:
-     * - --bg-*      : Background colors
-     * - --text-*    : Text colors
-     * - --border-*  : Border colors
-     * - --accent-*  : Action/highlight colors
-     * - --shadow-*  : Box shadows
-     * - --radius-*  : Border radius values
-     * 
-     * =============================================================================
-     */
-    :root {
-      /* ─────────────────────────────────────────────────────────────────────────
-         BACKGROUND COLORS - Light Theme (default)
-         ───────────────────────────────────────────────────────────────────────── */
-      --bg-primary: #f8fafc;      /* Main page background */
-      --bg-secondary: #ffffff;    /* Card backgrounds */
-      --bg-tertiary: #f1f5f9;     /* Nested elements, hover states */
-      --bg-card: #ffffff;         /* Modal/popup backgrounds */
-      
-      /* ─────────────────────────────────────────────────────────────────────────
-         TEXT COLORS
-         ───────────────────────────────────────────────────────────────────────── */
-      --text-primary: #1e293b;    /* Main text, headings */
-      --text-secondary: #475569;  /* Labels, descriptions */
-      --text-muted: #94a3b8;      /* Placeholders, hints, disabled */
-      
-      /* ─────────────────────────────────────────────────────────────────────────
-         BORDER COLORS
-         ───────────────────────────────────────────────────────────────────────── */
-      --border-light: #e2e8f0;    /* Subtle dividers */
-      --border-medium: #cbd5e1;   /* Input borders, separators */
-      
-      /* ─────────────────────────────────────────────────────────────────────────
-         ACCENT COLORS - Used for actions and status indicators
-         ───────────────────────────────────────────────────────────────────────── */
-      --accent-primary: #3b82f6;        /* Blue - primary actions, links */
-      --accent-primary-hover: #2563eb;  /* Blue hover state */
-      --accent-success: #10b981;        /* Green - success, paid, available */
-      --accent-warning: #f59e0b;        /* Orange - warnings, partial paid */
-      --accent-danger: #ef4444;         /* Red - errors, delete, occupied */
-      --accent-info: #06b6d4;           /* Cyan - info messages */
-      
-      /* ─────────────────────────────────────────────────────────────────────────
-         SHADOWS - Depth and elevation
-         ───────────────────────────────────────────────────────────────────────── */
-      --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
-      --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1);
-      --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1);
-      --shadow-xl: 0 20px 25px -5px rgba(0,0,0,0.1);
-      
-      /* ─────────────────────────────────────────────────────────────────────────
-         BORDER RADIUS - Rounded corners
-         ───────────────────────────────────────────────────────────────────────── */
-      --radius-sm: 6px;           /* Small elements (badges, tags) */
-      --radius-md: 10px;          /* Buttons, inputs */
-      --radius-lg: 14px;          /* Cards, modals */
-      --radius-xl: 20px;          /* Large containers */
-      
-      /* ─────────────────────────────────────────────────────────────────────────
-         TYPOGRAPHY
-         ───────────────────────────────────────────────────────────────────────── */
-      --font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-    }
-
-    /*
-     * ─────────────────────────────────────────────────────────────────────────────
-     * DARK THEME - Activated by adding data-theme="dark" to <html>
-     * ─────────────────────────────────────────────────────────────────────────────
-     */
-    [data-theme="dark"] {
-      --bg-primary: #0f172a;
-      --bg-secondary: #1e293b;
-      --bg-tertiary: #334155;
-      --bg-card: #1e293b;
-      --text-primary: #f1f5f9;
-      --text-secondary: #cbd5e1;
-      --text-muted: #64748b;
-      --border-light: #334155;
-      --border-medium: #475569;
-      /* Darker shadows for dark mode */
-      --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
-      --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.4);
-      --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.4);
-      --shadow-xl: 0 20px 25px -5px rgba(0,0,0,0.4);
-    }
-
-    /* ═══════════════════════════════════════════════════════════════════════════
-       BASE STYLES - Reset and defaults
-       ═══════════════════════════════════════════════════════════════════════════ */
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-
-    body {
-      font-family: var(--font-family);
-      background: var(--bg-primary);
-      background-image: 
-        radial-gradient(circle at 25% 25%, rgba(99, 102, 241, 0.03) 0%, transparent 50%),
-        radial-gradient(circle at 75% 75%, rgba(139, 92, 246, 0.03) 0%, transparent 50%);
-      background-attachment: fixed;
-      color: var(--text-primary);
-      min-height: 100vh;
-      transition: background 0.3s ease, color 0.3s ease;
-      /* Performance: GPU acceleration for smooth scrolling */
-      -webkit-overflow-scrolling: touch;
-    }
-    
-    [data-theme="dark"] body {
-      background-image: 
-        radial-gradient(circle at 25% 25%, rgba(99, 102, 241, 0.05) 0%, transparent 50%),
-        radial-gradient(circle at 75% 75%, rgba(139, 92, 246, 0.05) 0%, transparent 50%);
-    }
-
-    /* ═══════════════════════════════════════════════════════════════
-       PERFORMANCE OPTIMIZATIONS - CSS
-       ═══════════════════════════════════════════════════════════════ */
-    
-    /* Enable GPU acceleration for animations */
-    .modal, .modal-content, .room-cell, .stat-card, .btn {
-      will-change: auto;
-      transform: translateZ(0);
-    }
-    
-    /* Optimize paint containment for isolated components */
-    .room-grid, .transactions-grid, .stats-grid {
-      contain: layout style;
-    }
-    
-    /* Smooth scrolling for the entire app */
-    html {
-      scroll-behavior: smooth;
-    }
-    
-    /* Reduce motion for users who prefer it */
-    @media (prefers-reduced-motion: reduce) {
-      *, *::before, *::after {
-        animation-duration: 0.01ms !important;
-        animation-iteration-count: 1 !important;
-        transition-duration: 0.01ms !important;
-      }
-      html {
-        scroll-behavior: auto;
-      }
-    }
-    
-    /* Image optimization */
-    img {
-      content-visibility: auto;
-    }
-
-    /* ═══════════════════════════════════════════════════════════════
-       AUTH LOADING STATE - Hide content until authenticated
-       ═══════════════════════════════════════════════════════════════ */
-    body:not(.authenticated) .gh-header,
-    body:not(.authenticated) .dashboard,
-    body:not(.authenticated) .modal-overlay {
-      display: none !important;
-    }
-
-    /* Loading overlay - shown while checking auth */
-    .auth-loading-overlay {
-      position: fixed;
-      inset: 0;
-      background: linear-gradient(135deg, #0f172a 0%, #1a365d 100%);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      z-index: 99999;
-    }
-
-    body.authenticated .auth-loading-overlay {
-      display: none;
-    }
-
-    .auth-loading-spinner {
-      width: 56px;
-      height: 56px;
-      border: 4px solid rgba(255,255,255,0.1);
-      border-top-color: #3b82f6;
-      border-radius: 50%;
-      animation: authSpin 0.8s linear infinite;
-    }
-
-    @keyframes authSpin {
-      to { transform: rotate(360deg); }
-    }
-
-    .auth-loading-text {
-      margin-top: 20px;
-      color: rgba(255,255,255,0.8);
-      font-size: 1rem;
-      font-weight: 500;
-    }
-
-    .auth-loading-logo {
-      width: 80px;
-      height: 80px;
-      background: rgba(255,255,255,0.1);
-      border-radius: 16px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin-bottom: 24px;
-    }
-
-    .auth-loading-logo .material-icons {
-      font-size: 40px;
-      color: #3b82f6;
-    }
-
-    /* Header */
-    .gh-header {
-      background: linear-gradient(135deg, var(--bg-card) 0%, var(--bg-secondary) 100%);
-      border-bottom: 1px solid var(--border-light);
-      padding: 16px 24px;
-      position: sticky;
-      top: 0;
-      z-index: 100;
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-      backdrop-filter: blur(10px);
-      -webkit-backdrop-filter: blur(10px);
-    }
-
-    [data-theme="dark"] .gh-header {
-      background: linear-gradient(135deg, rgba(30, 41, 59, 0.95) 0%, rgba(15, 23, 42, 0.95) 100%);
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-    }
-
-    .header-content {
-      max-width: 1400px;
-      margin: 0 auto;
-      display:  flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 20px;
-      flex-wrap: wrap;
-    }
-
-    .brand {
-      display:  flex;
-      align-items: center;
-      gap: 12px;
-    }
-
-    .brand-icon {
-      width: 48px;
-      height: 48px;
-      background: linear-gradient(135deg, var(--accent-primary), #8b5cf6);
-      border-radius: var(--radius-md);
-      display: flex;
-      align-items:  center;
-      justify-content: center;
-      color: white;
-      font-size: 26px;
-      box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
-      animation: brandPulse 3s ease-in-out infinite;
-    }
-    
-    @keyframes brandPulse {
-      0%, 100% { box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3); }
-      50% { box-shadow: 0 6px 20px rgba(99, 102, 241, 0.5); }
-    }
-
-    .brand-title {
-      font-size: 1.35rem;
-      font-weight: 700;
-      color:  var(--text-primary);
-      letter-spacing: -0.5px;
-      background: linear-gradient(135deg, var(--text-primary), var(--accent-primary));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-    }
-
-    .brand-sub {
-      font-size: 0.8rem;
-      color: var(--text-muted);
-      margin-top: 2px;
-      font-weight: 500;
-      letter-spacing: 0.5px;
-    }
-
-    .nav-actions {
-      display:  flex;
-      align-items: center;
-      gap: 10px;
-      flex-wrap: wrap;
-    }
-
-    .header-controls {
-      display:  flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    /* ═══════════════════════════════════════════════════════════════
-       SECTION 4: BUTTONS (Performance Optimized)
-       ═══════════════════════════════════════════════════════════════ */
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 10px 16px;
-      font-size: 0.875rem;
-      font-weight: 500;
-      border-radius: var(--radius-md);
-      border: none;
-      cursor:  pointer;
-      /* Optimized transitions - only animate specific properties */
-      transition: transform 0.15s ease-out, box-shadow 0.15s ease-out, opacity 0.15s ease-out;
-      font-family: inherit;
-      white-space: nowrap;
-      /* GPU acceleration */
-      transform: translateZ(0);
-      backface-visibility: hidden;
-    }
-
-    .btn:active {
-      transform: translateZ(0) scale(0.97);
-    }
-
-    .btn .material-icons {
-      font-size:  18px;
-    }
-
-    .btn-primary {
-      background: linear-gradient(135deg, var(--accent-primary), #2563eb);
-      color: white;
-      box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3);
-    }
-
-    .btn-primary:hover {
-      transform: translateY(-1px);
-      box-shadow: 0 4px 8px rgba(59, 130, 246, 0.4);
-    }
-
-    .btn-secondary {
-      background:  var(--bg-tertiary);
-      color: var(--text-primary);
-      border: 1px solid var(--border-light);
-    }
-
-    .btn-secondary:hover {
-      background: var(--border-light);
-    }
-
-    .btn-ghost {
-      background:  transparent;
-      color: var(--text-secondary);
-      padding: 8px;
-    }
-
-    .btn-ghost:hover {
-      background: var(--bg-tertiary);
-      color: var(--text-primary);
-    }
-
-    .btn-icon {
-      width:  40px;
-      height: 40px;
-      padding: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      border-radius: var(--radius-md);
-      background: var(--bg-tertiary);
-      border: 1px solid var(--border-light);
-      color: var(--text-secondary);
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-
-    .btn-icon:hover {
-      background: var(--border-light);
-      color: var(--text-primary);
-    }
-
-    /* User Menu & Dropdown */
-    .user-menu {
-      position: relative;
-    }
-
-    .user-avatar {
-      background: linear-gradient(135deg, var(--accent-primary), #2563eb);
-      color: white;
-      border: none;
-    }
-
-    .user-avatar:hover {
-      background: linear-gradient(135deg, #2563eb, #1d4ed8);
-    }
-
-    .user-dropdown {
-      position: absolute;
-      top: calc(100% + 8px);
-      right: 0;
-      background: var(--bg-card);
-      border: 1px solid var(--border-light);
-      border-radius: var(--radius-lg);
-      box-shadow: var(--shadow-lg);
-      min-width: 220px;
-      padding: 8px;
-      opacity: 0;
-      visibility: hidden;
-      transform: translateY(-10px);
-      transition: all 0.2s ease;
-      z-index: 1000;
-    }
-
-    .user-dropdown.show {
-      opacity: 1;
-      visibility: visible;
-      transform: translateY(0);
-    }
-
-    .user-info {
-      padding: 12px;
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-    }
-
-    .user-info strong {
-      color: var(--text-primary);
-      font-size: 0.95rem;
-    }
-
-    .user-info small {
-      color: var(--text-muted);
-      font-size: 0.75rem;
-      text-transform: capitalize;
-    }
-
-    .dropdown-item {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      width: 100%;
-      padding: 10px 12px;
-      background: none;
-      border: none;
-      border-radius: var(--radius-md);
-      color: var(--text-secondary);
-      font-size: 0.875rem;
-      cursor: pointer;
-      transition: all 0.15s;
-      text-align: left;
-    }
-
-    .dropdown-item:hover {
-      background: var(--bg-tertiary);
-      color: var(--text-primary);
-    }
-
-    .dropdown-item .material-icons {
-      font-size: 20px;
-    }
-
-    .dropdown-item.logout {
-      color: var(--accent-danger);
-    }
-
-    .dropdown-item.logout:hover {
-      background: rgba(239, 68, 68, 0.1);
-    }
-
-    .btn-success {
-      background: var(--accent-success);
-      color: white;
-    }
-
-    .btn-warning {
-      background:  var(--accent-warning);
-      color: white;
-    }
-
-    .btn-danger {
-      background: var(--accent-danger);
-      color: white;
-    }
-
-    /* ═══════════════════════════════════════════════════════════════
-       SECTION 5: MAIN DASHBOARD
-       ═══════════════════════════════════════════════════════════════ */
-    .dashboard {
-      max-width: 1400px;
-      margin: 0 auto;
-      padding:  24px;
-    }
-
-    /* Stats Cards */
-    .stats-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 16px;
-      margin-bottom: 24px;
-      contain: layout style;
-    }
-
-    .stat-card {
-      background: var(--bg-card);
-      border-radius: var(--radius-lg);
-      padding: 20px;
-      border: 1px solid var(--border-light);
-      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-      position: relative;
-      overflow: hidden;
-      /* GPU acceleration */
-      transform: translateZ(0);
-      backface-visibility: hidden;
-    }
-
-    .stat-card::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      height: 4px;
-      background: linear-gradient(90deg, var(--accent-primary), #8b5cf6);
-      opacity: 0;
-      transition: opacity 0.3s ease;
-    }
-
-    .stat-card:hover {
-      transform: translateZ(0) translateY(-4px);
-      box-shadow: 0 12px 24px rgba(0, 0, 0, 0.15);
-      border-color: var(--accent-primary);
-    }
-
-    .stat-card:hover::before {
-      opacity: 1;
-    }
-
-    [data-theme="dark"] .stat-card:hover {
-      box-shadow: 0 12px 24px rgba(0, 0, 0, 0.4);
-    }
-
-    .stat-card-header {
-      display:  flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 12px;
-    }
-
-    .stat-icon {
-      width:  48px;
-      height: 48px;
-      border-radius: var(--radius-md);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: white;
-      transition: transform 0.3s ease, box-shadow 0.3s ease;
-    }
-
-    .stat-card:hover .stat-icon {
-      transform: scale(1.1) rotate(5deg);
-    }
-
-    .stat-icon.blue { 
-      background: linear-gradient(135deg, #3b82f6, #1d4ed8); 
-      box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
-    }
-    .stat-icon.green { 
-      background: linear-gradient(135deg, #10b981, #059669); 
-      box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
-    }
-    .stat-icon.orange { 
-      background: linear-gradient(135deg, #f59e0b, #d97706); 
-      box-shadow: 0 4px 12px rgba(245, 158, 11, 0.4);
-    }
-    .stat-icon.purple { 
-      background: linear-gradient(135deg, #8b5cf6, #6d28d9); 
-      box-shadow: 0 4px 12px rgba(139, 92, 246, 0.4);
-    }
-    .stat-icon.red { 
-      background: linear-gradient(135deg, #ef4444, #dc2626); 
-      box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
-    }
-    .stat-icon.cyan { 
-      background: linear-gradient(135deg, #06b6d4, #0891b2); 
-      box-shadow: 0 4px 12px rgba(6, 182, 212, 0.4);
-    }
-
-    .stat-value {
-      font-size: 2rem;
-      font-weight: 800;
-      color:  var(--text-primary);
-      line-height: 1.2;
-      letter-spacing: -0.02em;
-      background: linear-gradient(135deg, var(--text-primary), var(--text-secondary));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-    }
-
-    .stat-label {
-      font-size: 0.9rem;
-      color: var(--text-secondary);
-      margin-top: 8px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-
-    .stat-trend {
-      font-size: 0.75rem;
-      display: flex;
-      align-items: center;
-      gap:  4px;
-      margin-top: 8px;
-    }
-
-    .stat-trend.up { color: var(--accent-success); }
-    .stat-trend.down { color: var(--accent-danger); }
-
-    /* Dashboard Grid */
-    .dashboard-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap:  20px;
-      margin-bottom: 24px;
-    }
-
-    @media (max-width: 1024px) {
-      .dashboard-grid {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    /* Panels */
-    .panel {
-      background: var(--bg-card);
-      border-radius: var(--radius-lg);
-      border: 1px solid var(--border-light);
-      overflow: hidden;
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
-      transition: box-shadow 0.3s ease, transform 0.3s ease;
-    }
-
-    .panel:hover {
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
-    }
-
-    [data-theme="dark"] .panel {
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
-    }
-
-    [data-theme="dark"] .panel:hover {
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-    }
-
-    .panel-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 18px 24px;
-      border-bottom: 1px solid var(--border-light);
-      background: linear-gradient(135deg, var(--bg-tertiary) 0%, var(--bg-card) 100%);
-    }
-
-    .panel-title {
-      font-size: 1.05rem;
-      font-weight: 700;
-      color: var(--text-primary);
-      display: flex;
-      align-items: center;
-      gap:  10px;
-    }
-
-    .panel-title .material-icons {
-      color: var(--accent-primary);
-      font-size: 22px;
-      background: linear-gradient(135deg, var(--accent-primary), #8b5cf6);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-    }
-
-    .panel-body {
-      padding: 20px 24px;
-    }
-
-    /* Quick Actions */
-    .quick-actions-grid {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 14px;
-    }
-
-    .quick-action-btn {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 10px;
-      padding: 20px 14px;
-      background: linear-gradient(145deg, var(--bg-tertiary), var(--bg-card));
-      border: 1px solid var(--border-light);
-      border-radius: var(--radius-lg);
-      cursor: pointer;
-      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-      text-decoration: none;
-      color: var(--text-primary);
-      position: relative;
-      overflow: hidden;
-    }
-
-    .quick-action-btn::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: -100%;
-      width: 100%;
-      height: 100%;
-      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
-      transition: left 0.5s ease;
-    }
-
-    .quick-action-btn:hover::before {
-      left: 100%;
-    }
-
-    .quick-action-btn:hover {
-      background: linear-gradient(135deg, var(--accent-primary), #2563eb);
-      color: white;
-      border-color: var(--accent-primary);
-      transform: translateY(-4px) scale(1.02);
-      box-shadow: 0 8px 20px rgba(59, 130, 246, 0.35);
-    }
-
-    .quick-action-btn .material-icons {
-      font-size: 28px;
-      transition: transform 0.3s ease;
-    }
-
-    .quick-action-btn:hover .material-icons {
-      transform: scale(1.15);
-    }
-
-    .quick-action-btn span:last-child {
-      font-size: 0.85rem;
-      font-weight: 600;
-      letter-spacing: 0.02em;
-    }
-
-    /* Recent Reservations Table */
-    .table-container {
-      overflow-x: auto;
-      border-radius: var(--radius-md);
-      border: 1px solid var(--border-color);
-    }
-
-    .data-table {
-      width: 100%;
-      border-collapse: collapse;
-    }
-
-    .data-table th,
-    .data-table td {
-      padding: 14px 18px;
-      text-align: left;
-      border-bottom: 1px solid var(--border-light);
-    }
-
-    .data-table th {
-      font-size: 0.75rem;
-      font-weight: 700;
-      color:  var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      background: linear-gradient(180deg, var(--bg-tertiary), var(--bg-secondary));
-      position: sticky;
-      top: 0;
-    }
-    
-    .data-table th:first-child {
-      border-radius: var(--radius-md) 0 0 0;
-    }
-    
-    .data-table th:last-child {
-      border-radius: 0 var(--radius-md) 0 0;
-    }
-
-    .data-table td {
-      font-size: 0.875rem;
-      color: var(--text-primary);
-    }
-
-    .data-table tbody tr {
-      transition: all 0.2s ease;
-      cursor: pointer;
-    }
-
-    .data-table tbody tr:hover {
-      background: linear-gradient(90deg, rgba(99, 102, 241, 0.05), transparent);
-      transform: translateX(4px);
-    }
-    
-    .data-table tbody tr:last-child td {
-      border-bottom: none;
-    }
-
-    .status-badge {
-      display: inline-flex;
-      align-items: center;
-      padding: 5px 12px;
-      border-radius: 20px;
-      font-size: 0.7rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.3px;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-    }
-
-    .status-badge.paid {
-      background: linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(16, 185, 129, 0.25));
-      color: var(--accent-success);
-      border: 1px solid rgba(16, 185, 129, 0.3);
-    }
-
-    .status-badge.partial {
-      background: linear-gradient(135deg, rgba(245, 158, 11, 0.15), rgba(245, 158, 11, 0.25));
-      color: var(--accent-warning);
-      border: 1px solid rgba(245, 158, 11, 0.3);
-    }
-
-    .status-badge.unpaid {
-      background: linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(239, 68, 68, 0.25));
-      color: var(--accent-danger);
-      border: 1px solid rgba(239, 68, 68, 0.3);
-    }
-
-    /* Calendar Styles */
-    .calendar-header {
-      display:  flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 20px;
-      padding-bottom: 12px;
-      border-bottom: 1px solid var(--border-color);
-    }
-
-    .calendar-nav {
-      display:  flex;
-      align-items: center;
-      gap: 10px;
-    }
-    
-    .calendar-nav .btn-icon {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border-color);
-      transition: all 0.2s ease;
-    }
-    
-    .calendar-nav .btn-icon:hover {
-      background: var(--accent-primary);
-      color: white;
-      border-color: var(--accent-primary);
-      transform: scale(1.05);
-    }
-
-    .calendar-title {
-      font-size: 1.1rem;
-      font-weight: 700;
-      min-width: 160px;
-      text-align: center;
-      color: var(--text-primary);
-    }
-
-    .calendar-grid {
-      display:  grid;
-      grid-template-columns:  repeat(7, 1fr);
-      gap: 4px;
-      background: var(--border-color);
-      border-radius: var(--radius-md);
-      padding: 4px;
-    }
-
-    .calendar-day-header {
-      padding: 10px 4px;
-      text-align: center;
-      font-size: 0.75rem;
-      font-weight: 700;
-      color:  var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-
-    .calendar-day {
-      min-height: 85px;
-      padding: 6px;
-      background: var(--bg-primary);
-      border-radius: var(--radius-sm);
-      position: relative;
-      transition: all 0.2s ease;
-    }
-    
-    .calendar-day:hover {
-      background: var(--bg-secondary);
-      transform: scale(1.02);
-      z-index: 1;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-    }
-
-    .calendar-day.other-month {
-      opacity: 0.4;
-    }
-
-    .calendar-day.today {
-      background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(139, 92, 246, 0.1));
-      border:  2px solid var(--accent-primary);
-      box-shadow: 0 0 15px rgba(59, 130, 246, 0.2);
-    }
-    
-    .calendar-day.today .calendar-day-number {
-      color: var(--accent-primary);
-      font-weight: 700;
-    }
-
-    .calendar-day-number {
-      font-size: 0.8rem;
-      font-weight: 600;
-      color:  var(--text-secondary);
-      margin-bottom: 6px;
-    }
-
-    .calendar-event {
-      font-size: 0.65rem;
-      padding: 3px 6px;
-      border-radius: 4px;
-      margin-bottom: 3px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      cursor: pointer;
-      font-weight: 500;
-      transition: all 0.2s ease;
-    }
-    
-    .calendar-event:hover {
-      transform: translateX(2px);
-      filter: brightness(1.1);
-    }
-
-    .calendar-event.checkin {
-      background:  linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(16, 185, 129, 0.3));
-      color: var(--accent-success);
-      border-left: 3px solid var(--accent-success);
-    }
-
-    .calendar-event.checkout {
-      background:  linear-gradient(135deg, rgba(239, 68, 68, 0.2), rgba(239, 68, 68, 0.3));
-      color: var(--accent-danger);
-      border-left: 3px solid var(--accent-danger);
-    }
-
-    .calendar-event.staying {
-      background:  linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(59, 130, 246, 0.3));
-      color: var(--accent-primary);
-      border-left: 3px solid var(--accent-primary);
-    }
-
-    /* Room Status Grid */
-    .room-grid {
-      display:  grid;
-      grid-template-columns:  repeat(auto-fill, minmax(90px, 1fr));
-      gap: 10px;
-      contain: layout style;
-    }
-
-    .room-card {
-      padding: 14px 8px;
-      border-radius: var(--radius-lg);
-      text-align: center;
-      cursor: pointer;
-      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-      border: 2px solid transparent;
-      overflow: hidden;
-      position: relative;
-      /* GPU acceleration */
-      transform: translateZ(0);
-      backface-visibility: hidden;
-    }
-
-    .room-card::after {
-      content: '';
-      position: absolute;
-      inset: 0;
-      background: linear-gradient(180deg, rgba(255,255,255,0.1) 0%, transparent 100%);
-      pointer-events: none;
-    }
-
-    .room-card:hover {
-      transform: translateZ(0) scale(1.08) translateY(-2px);
-      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
-    }
-
-    .room-card:active {
-      transform: translateZ(0) scale(0.98);
-    }
-
-    .room-card.available {
-      background: linear-gradient(145deg, rgba(16, 185, 129, 0.15), rgba(16, 185, 129, 0.05));
-      border-color: var(--accent-success);
-    }
-
-    .room-card.available:hover {
-      box-shadow: 0 8px 20px rgba(16, 185, 129, 0.3);
-    }
-
-    .room-card.occupied {
-      background: linear-gradient(145deg, rgba(239, 68, 68, 0.15), rgba(239, 68, 68, 0.05));
-      border-color: var(--accent-danger);
-    }
-
-    .room-card.occupied:hover {
-      box-shadow: 0 8px 20px rgba(239, 68, 68, 0.3);
-    }
-
-    .room-card.checkout-today {
-      background: linear-gradient(145deg, rgba(245, 158, 11, 0.2), rgba(245, 158, 11, 0.05));
-      border-color: var(--accent-warning);
-      animation: pulseWarning 2s ease-in-out infinite;
-    }
-
-    @keyframes pulseWarning {
-      0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.3); }
-      50% { box-shadow: 0 0 0 6px rgba(245, 158, 11, 0); }
-    }
-
-    .room-card.checkout-today .room-status-text {
-      color: var(--accent-warning);
-      font-weight: 700;
-    }
-
-    .room-card.maintenance {
-      background: linear-gradient(145deg, rgba(139, 92, 246, 0.2), rgba(139, 92, 246, 0.05));
-      border-color: #8b5cf6;
-    }
-    .room-card.maintenance .room-status-text {
-      color: #8b5cf6;
-      font-weight: 700;
-    }
-
-    .room-number {
-      font-size: 1.1rem;
-      font-weight: 800;
-      color:  var(--text-primary);
-      letter-spacing: -0.02em;
-    }
-
-    .room-status-text {
-      font-size: 0.65rem;
-      color: var(--text-muted);
-      margin-top: 6px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      font-weight: 500;
-      text-transform: uppercase;
-      letter-spacing: 0.03em;
-    }
-
-    /* Charts */
-    .chart-container {
-      height: 220px;
-      position: relative;
-      background: linear-gradient(180deg, transparent, rgba(99, 102, 241, 0.02));
-      border-radius: var(--radius-md);
-      padding: 12px;
-    }
-
-    /* Revenue Filter Buttons */
-    .filter-btn {
-      padding: 6px 14px;
-      border: 1px solid var(--border-medium);
-      background: var(--bg-secondary);
-      color: var(--text-primary);
-      border-radius: 20px;
-      cursor: pointer;
-      font-size: 12px;
-      font-weight: 600;
-      transition: all 0.25s ease;
-    }
-    .filter-btn:hover {
-      background: var(--bg-tertiary);
-      transform: translateY(-2px);
-      box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-    }
-    .filter-btn.active {
-      background: linear-gradient(135deg, var(--accent-primary), #8b5cf6);
-      color: white;
-      border-color: transparent;
-      box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
-    }
-
-    /* Availability Grid Table */
-    .availability-grid-table {
-      width: 100%;
-      border-collapse: separate;
-      border-spacing: 0;
-      font-size: 14px;
-      border-radius: var(--radius-md);
-      overflow: hidden;
-    }
-    .availability-grid-table th,
-    .availability-grid-table td {
-      border: 1px solid var(--border-light);
-      padding: 12px 14px;
-      text-align: center;
-      min-width: 120px;
-    }
-    .availability-grid-table th {
-      background: linear-gradient(180deg, var(--bg-secondary), var(--bg-tertiary));
-      font-weight: 700;
-      position: sticky;
-      top: 0;
-      text-transform: uppercase;
-      font-size: 0.75rem;
-      letter-spacing: 0.5px;
-      color: var(--text-muted);
-    }
-    .availability-grid-table th:first-child {
-      position: sticky;
-      left: 0;
-      z-index: 2;
-      background: linear-gradient(180deg, var(--bg-secondary), var(--bg-tertiary));
-    }
-    .availability-grid-table td:first-child {
-      position: sticky;
-      left: 0;
-      background: var(--bg-card);
-      font-weight: 700;
-      z-index: 1;
-      color: var(--text-primary);
-    }
-    .availability-grid-table .cell-available {
-      background: linear-gradient(135deg, #dcfce7, #bbf7d0);
-    }
-    .availability-grid-table .cell-occupied {
-      cursor: pointer;
-      transition: all 0.2s ease;
-    }
-    .availability-grid-table .cell-occupied:hover {
-      transform: scale(1.02);
-      box-shadow: inset 0 0 0 2px var(--accent-primary);
-    }
-    .availability-grid-table .guest-btn {
-      padding: 8px 12px;
-      border: none;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 13px;
-      font-weight: 600;
-      color: white;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      max-width: 100%;
-      transition: all 0.2s ease;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-    }
-    .availability-grid-table .guest-btn:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 4px 8px rgba(0,0,0,0.3);
-    }
-    .availability-grid-table .guest-btn.unpaid {
-      background: linear-gradient(135deg, #dc2626, #b91c1c);
-    }
-    .availability-grid-table .guest-btn.partial {
-      background: linear-gradient(135deg, #2563eb, #1d4ed8);
-    }
-    .availability-grid-table .guest-btn.paid {
-      background: linear-gradient(135deg, #059669, #047857);
-    }
-    [data-theme="dark"] .availability-grid-table .cell-available {
-      background: rgba(16, 185, 129, 0.15);
-    }
-
-    /* ═══════════════════════════════════════════════════════════════
-       SECTION 6: MODALS (Performance Optimized)
-       ═══════════════════════════════════════════════════════════════ */
-    .modal {
-      display: none;
-      position:  fixed;
-      z-index: 1000;
-      left: 0;
-      top: 0;
-      width:  100vw;
-      height: 100vh;
-      overflow: auto;
-      background-color: rgba(0,0,0,0.5);
-      backdrop-filter: blur(4px);
-      /* GPU acceleration for smooth backdrop */
-      transform: translateZ(0);
-      -webkit-overflow-scrolling: touch;
-    }
-
-    .modal-content {
-      background-color: var(--bg-card);
-      color: var(--text-primary);
-      margin: 5% auto;
-      padding: 24px;
-      width: 90%;
-      max-width:  600px;
-      max-height: 85vh;
-      overflow-y: auto;
-      border-radius: var(--radius-lg);
-      box-shadow:  var(--shadow-xl);
-      border: 1px solid var(--border-light);
-      /* GPU acceleration for smooth animations */
-      transform: translateZ(0);
-      backface-visibility: hidden;
-      /* Custom scrollbar styling */
-      scrollbar-width: thin;
-      scrollbar-color: var(--accent-primary) var(--bg-secondary);
-    }
-
-    /* Custom scrollbar for WebKit browsers (Chrome, Safari, Edge) */
-    .modal-content::-webkit-scrollbar {
-      width: 8px;
-    }
-
-    .modal-content::-webkit-scrollbar-track {
-      background: var(--bg-secondary);
-      border-radius: 4px;
-    }
-
-    .modal-content::-webkit-scrollbar-thumb {
-      background: var(--accent-primary);
-      border-radius: 4px;
-    }
-
-    .modal-content::-webkit-scrollbar-thumb:hover {
-      background: var(--accent-primary-hover);
-    }
-
-    .modal-content h2,
-    .modal-content h3 {
-      margin-bottom: 20px;
-      color: var(--text-primary);
-    }
-
-    .close {
-      color: var(--text-muted);
-      float: right;
-      font-size: 28px;
-      font-weight: bold;
-      cursor:  pointer;
-      transition: color 0.2s;
-    }
-
-    .close:hover {
-      color: var(--accent-danger);
-    }
-
-    label {
-      display:  block;
-      margin-bottom: 6px;
-      font-size: 0.875rem;
-      font-weight: 500;
-      color: var(--text-secondary);
-    }
-
-    input[type="text"],
-    input[type="date"],
-    input[type="tel"],
-    input[type="number"],
-    input[type="email"],
-    input[type="search"],
-    select,
-    textarea {
-      width: 100%;
-      padding: 10px 12px;
-      margin-bottom: 16px;
-      border: 1px solid var(--border-light);
-      border-radius: var(--radius-md);
-      background: var(--bg-tertiary);
-      color: var(--text-primary);
-      font-size: 0.9rem;
-      font-family: inherit;
-      transition: border-color 0.2s, box-shadow 0.2s;
-    }
-
-    input:focus,
-    select:focus,
-    textarea:focus {
-      outline: none;
-      border-color: var(--accent-primary);
-      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-    }
-
-    textarea {
-      resize:  vertical;
-      min-height: 80px;
-    }
-
-    .modal-footer {
-      margin-top: 24px;
-      display: flex;
-      justify-content: flex-end;
-      gap: 10px;
-      flex-wrap: wrap;
-    }
-
-    .modal-footer button {
-      padding: 10px 20px;
-      border-radius: var(--radius-md);
-      font-size: 0.9rem;
-      font-weight: 500;
-      cursor: pointer;
-      border: none;
-      transition: all 0.2s;
-    }
-
-    /* Availability Grid Styles */
-    #availabilityGrid table {
-      border-collapse: collapse;
-      width: 100%;
-      font-size: 0.8rem;
-    }
-
-    #availabilityGrid th,
-    #availabilityGrid td {
-      border: 1px solid var(--border-light);
-      padding: 8px;
-      text-align: center;
-      color: var(--text-primary);
-    }
-
-    #availabilityGrid th {
-      background-color: var(--bg-tertiary);
-      font-weight: 600;
-    }
-
-    /* Payment Box */
-    .payment-box {
-      background: var(--bg-tertiary);
-      padding: 16px;
-      border-radius: var(--radius-md);
-      margin-top: 16px;
-    }
-
-    .payment-entry {
-      display:  flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 10px 0;
-      border-bottom:  1px solid var(--border-light);
-    }
-
-    .payment-entry:last-child {
-      border-bottom: none;
-    }
-
-    /* Suggestions dropdown */
-    #suggestions {
-      position:  absolute;
-      background: var(--bg-card);
-      border: 1px solid var(--border-light);
-      border-radius: var(--radius-md);
-      box-shadow: var(--shadow-lg);
-      max-height: 200px;
-      overflow-y: auto;
-      z-index: 1001;
-      display: none;
-    }
-
-    .suggestion-item {
-      padding: 10px 16px;
-      cursor: pointer;
-      border-bottom: 1px solid var(--border-light);
-      transition: background 0.15s;
-    }
-
-    .suggestion-item:hover {
-      background: var(--bg-tertiary);
-    }
-
-    .suggestion-item:last-child {
-      border-bottom:  none;
-    }
-
-    /* Color legend */
-    .color-legend {
-      display: flex;
-      gap: 16px;
-      justify-content: center;
-      margin:  16px 0;
-      flex-wrap: wrap;
-    }
-
-    .legend-item {
-      display: flex;
-      align-items:  center;
-      gap: 6px;
-      font-size: 0.8rem;
-      color: var(--text-secondary);
-    }
-
-    .legend-color {
-      width:  16px;
-      height: 16px;
-      border-radius: 4px;
-    }
-
-    .legend-color.paid-full { background: #10b981; }
-    .legend-color.paid-deposit { background: #3b82f6; }
-    .legend-color.unpaid { background: #ef4444; }
-    
-    /* Check status cell backgrounds */
-    .cell-occupied.checked-in { background: #d1fae5 !important; }
-    .cell-occupied.checked-out { background: #e5e7eb !important; }
-    .cell-occupied.pending { background: #fef3c7 !important; }
-
-    /* Customer ID Preview */
-    #customerIdPreview {
-      margin:  12px 0;
-      text-align: center;
-      padding: 12px;
-      background: var(--bg-tertiary);
-      border-radius: var(--radius-md);
-      border: 1px dashed var(--border-medium);
-    }
-
-    #customerIdPreview img {
-      max-width: 150px;
-      border-radius: var(--radius-sm);
-      border: 1px solid var(--border-light);
-    }
-
-    /* Summary Table */
-    #summaryTable {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 0.875rem;
-    }
-
-    #summaryTable th,
-    #summaryTable td {
-      padding:  10px 12px;
-      text-align: left;
-      border:  1px solid var(--border-light);
-    }
-
-    #summaryTable th {
-      background: var(--bg-tertiary);
-      font-weight:  600;
-    }
-
-    #summaryFooter {
-      margin-top: 16px;
-      padding:  16px;
-      background: var(--bg-tertiary);
-      border-radius: var(--radius-md);
-    }
-
-    /* Notification Badge */
-    .notification-badge {
-      position: relative;
-    }
-
-    .notification-count {
-      position:  absolute;
-      top: -6px;
-      right: -6px;
-      background: var(--accent-danger);
-      color: white;
-      font-size: 0.65rem;
-      font-weight: 600;
-      min-width: 18px;
-      height: 18px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    /* ═══════════════════════════════════════════════════════════════
-       SECTION 6B: MODAL VARIANTS & FORM UTILITIES
-       ═══════════════════════════════════════════════════════════════ */
-    
-    /* Modal size variants */
-    .modal-content.modal-sm { max-width: 420px; }
-    .modal-content.modal-lg { max-width: 900px; }
-    .modal-content.modal-xl { max-width: 1100px; }
-    .modal-content.modal-scrollable { max-height: 90vh; overflow-y: auto; }
-
-    /* ═══════════════════════════════════════════════════════════════
-       RESERVATION POPUP - Modern Design
-       ═══════════════════════════════════════════════════════════════ */
-    .reservation-popup-modal {
-      z-index: 2000;
-    }
-    
-    .reservation-popup {
-      max-width: 560px;
-      animation: modalSlideIn 0.2s ease-out;
-    }
-    
-    @keyframes modalSlideIn {
-      from { opacity: 0; transform: translateY(-20px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-    
-    /* Toast notification animations */
-    @keyframes slideIn {
-      from { opacity: 0; transform: translateX(100px); }
-      to { opacity: 1; transform: translateX(0); }
-    }
-    
-    @keyframes slideOut {
-      from { opacity: 1; transform: translateX(0); }
-      to { opacity: 0; transform: translateX(100px); }
-    }
-    
-    .reservation-popup-header {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 12px;
-      margin-bottom: 24px;
-      padding-bottom: 16px;
-      border-bottom: 1px solid var(--border-light);
-    }
-    
-    .reservation-popup-header .material-icons {
-      font-size: 32px;
-      color: var(--accent-primary);
-    }
-    
-    .reservation-popup-header h2 {
-      margin: 0;
-      font-size: 1.5rem;
-      font-weight: 600;
-    }
-    
-    .reservation-info-card {
-      background: var(--bg-tertiary);
-      border-radius: var(--radius-lg);
-      padding: 20px;
-      margin-bottom: 20px;
-    }
-    
-    .info-grid {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 16px;
-      margin-bottom: 20px;
-    }
-    
-    .info-item {
-      display: flex;
-      align-items: flex-start;
-      gap: 12px;
-    }
-    
-    .info-item .material-icons {
-      color: var(--accent-primary);
-      font-size: 20px;
-      margin-top: 2px;
-    }
-    
-    .info-item label {
-      font-size: 0.75rem;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 2px;
-    }
-    
-    .info-item strong {
-      display: block;
-      color: var(--text-primary);
-      font-size: 0.95rem;
-    }
-    
-    .dates-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      padding: 16px;
-      background: var(--bg-card);
-      border-radius: var(--radius-md);
-      border: 1px solid var(--border-light);
-    }
-    
-    .date-block {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-    
-    .date-block .material-icons {
-      color: var(--accent-primary);
-      font-size: 24px;
-    }
-    
-    .date-block label {
-      font-size: 0.7rem;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: var(--text-muted);
-      margin-bottom: 2px;
-    }
-    
-    .date-block strong {
-      display: block;
-      font-size: 0.95rem;
-      color: var(--text-primary);
-    }
-    
-    .date-block small {
-      font-size: 0.75rem;
-      color: var(--text-muted);
-    }
-    
-    .nights-badge {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      min-width: 60px;
-      padding: 8px 12px;
-      background: linear-gradient(135deg, var(--accent-primary), #2563eb);
-      border-radius: var(--radius-md);
-      color: white;
-    }
-    
-    .nights-badge span {
-      font-size: 1.5rem;
-      font-weight: 700;
-      line-height: 1;
-    }
-    
-    .nights-badge small {
-      font-size: 0.65rem;
-      text-transform: uppercase;
-      opacity: 0.9;
-    }
-    
-    .note-section {
-      display: flex;
-      align-items: flex-start;
-      gap: 10px;
-      margin-top: 16px;
-      padding-top: 16px;
-      border-top: 1px solid var(--border-light);
-      font-size: 0.9rem;
-      color: var(--text-secondary);
-    }
-    
-    .note-section .material-icons {
-      color: var(--text-muted);
-      font-size: 18px;
-    }
-    
-    .status-cards {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 12px;
-      margin-bottom: 20px;
-    }
-    
-    .status-card {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 14px;
-      border-radius: var(--radius-md);
-      border: 1px solid var(--border-light);
-      background: var(--bg-tertiary);
-    }
-    
-    .status-card .material-icons {
-      font-size: 28px;
-    }
-    
-    .status-card strong {
-      display: block;
-      font-size: 0.8rem;
-      color: var(--text-primary);
-    }
-    
-    .status-card span {
-      font-size: 0.75rem;
-      color: var(--text-muted);
-    }
-    
-    .status-card.status-success {
-      background: rgba(16, 185, 129, 0.1);
-      border-color: var(--accent-success);
-    }
-    
-    .status-card.status-success .material-icons {
-      color: var(--accent-success);
-    }
-    
-    .status-card.status-pending {
-      background: rgba(245, 158, 11, 0.1);
-      border-color: var(--accent-warning);
-    }
-    
-    .status-card.status-pending .material-icons {
-      color: var(--accent-warning);
-    }
-    
-    .status-card.status-disabled {
-      opacity: 0.5;
-    }
-    
-    .action-buttons-row {
-      display: flex;
-      gap: 10px;
-      justify-content: center;
-      flex-wrap: wrap;
-      margin-bottom: 24px;
-      padding-bottom: 20px;
-      border-bottom: 1px solid var(--border-light);
-    }
-    
-    .btn-disabled {
-      background: var(--bg-tertiary) !important;
-      color: var(--text-muted) !important;
-      cursor: not-allowed !important;
-      box-shadow: none !important;
-    }
-    
-    .btn-sm {
-      padding: 6px 12px !important;
-      font-size: 0.8rem !important;
-    }
-    
-    .edit-section {
-      background: var(--bg-tertiary);
-      border-radius: var(--radius-md);
-      padding: 20px;
-      margin-bottom: 20px;
-    }
-    
-    .edit-section h3 {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 1rem;
-      margin-bottom: 16px;
-      color: var(--text-primary);
-    }
-    
-    .edit-section h3 .material-icons {
-      font-size: 20px;
-      color: var(--accent-primary);
-    }
-    
-    .form-row {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 16px;
-    }
-    
-    .form-group {
-      margin-bottom: 0;
-    }
-    
-    .form-group label {
-      margin-bottom: 6px;
-    }
-    
-    .form-group input,
-    .form-group select,
-    .form-group textarea {
-      margin-bottom: 12px;
-    }
-    
-    /* Responsive adjustments for reservation popup */
-    @media (max-width: 600px) {
-      .reservation-popup {
-        max-width: 95vw;
-        margin: 2% auto;
-        padding: 16px;
-      }
-      
-      .info-grid {
-        grid-template-columns: 1fr;
-      }
-      
-      .dates-row {
-        flex-direction: column;
-        gap: 16px;
-      }
-      
-      .form-row {
-        grid-template-columns: 1fr;
-      }
-      
-      .status-cards {
-        grid-template-columns: 1fr;
-      }
-      
-      .modal-footer {
-        flex-direction: column;
-      }
-      
-      .modal-footer .btn {
-        width: 100%;
-        justify-content: center;
-      }
-    }
-    
-    /* Modal header centered */
-    .modal-header-centered {
-      text-align: center;
-      margin-bottom: 20px;
-    }
-    
-    /* Filter panel (used in batch close, date filters, etc.) */
-    .filter-panel {
-      display: flex;
-      gap: 16px;
-      flex-wrap: wrap;
-      align-items: flex-end;
-      margin-bottom: 20px;
-      padding: 16px;
-      background: var(--bg-tertiary);
-      border-radius: var(--radius-md);
-    }
-    
-    .filter-group {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
-    
-    .filter-group label {
-      font-weight: 600;
-      margin-bottom: 4px;
-    }
-    
-    .filter-group input,
-    .filter-group select {
-      margin-bottom: 0;
-    }
-    
-    /* Radio/Checkbox group styling */
-    .radio-group,
-    .checkbox-group {
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-      margin: 16px 0;
-    }
-    
-    .radio-option,
-    .checkbox-option {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      cursor: pointer;
-    }
-    
-    .radio-option input,
-    .checkbox-option input {
-      width: auto;
-      margin-bottom: 0;
-    }
-    
-    /* Custom date range container */
-    .date-range-container {
-      margin-top: 16px;
-      display: none;
-    }
-    
-    .date-range-container.visible {
-      display: block;
-    }
-    
-    .date-range-row {
-      display: flex;
-      gap: 16px;
-      flex-wrap: wrap;
-    }
-    
-    .date-range-row label {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
-    
-    .date-range-row input {
-      margin-bottom: 0;
-    }
-    
-    /* Results container */
-    .results-container {
-      margin-top: 20px;
-      max-height: 400px;
-      overflow-y: auto;
-    }
-    
-    /* Report output area */
-    .report-output {
-      margin-top: 20px;
-      padding: 16px;
-      background: var(--bg-tertiary);
-      border-radius: var(--radius-md);
-      min-height: 200px;
-    }
-    
-    /* Image preview/crop container */
-    .image-preview-container {
-      text-align: center;
-      margin: 16px 0;
-    }
-    
-    .image-preview-container img {
-      max-width: 100%;
-      max-height: 400px;
-      border-radius: var(--radius-md);
-    }
-    
-    /* Utility classes */
-    .text-center { text-align: center; }
-    .text-muted { color: var(--text-muted); }
-    .text-danger { color: var(--accent-danger); }
-    .text-success { color: var(--accent-success); }
-    
-    .error-message {
-      color: var(--accent-danger);
-      margin-top: 10px;
-      display: none;
-    }
-    
-    .error-message.visible {
-      display: block;
-    }
-    
-    /* Print modal - special sizing for forms */
-    .modal-content.modal-print {
-      width: 8.5in;
-      max-width: 95vw;
-      height: auto;
-      overflow: visible;
-      padding: 0;
-      background: transparent;
-    }
-    
-    /* Registration form page - no inner scrollbar */
-    .registration-form-page {
-      overflow: visible !important;
-      box-sizing: border-box;
-    }
-    
-    /* Table container for horizontal scroll */
-    .table-container {
-      overflow-x: auto;
-      margin: 16px 0;
-    }
-    
-    /* Payment history list */
-    .payment-history {
-      margin-top: 16px;
-      max-height: 200px;
-      overflow-y: auto;
-    }
-    
-    /* Scrollable list containers */
-    .list-container {
-      margin-top: 16px;
-      max-height: 300px;
-      overflow-y: auto;
-    }
-    
-    /* Legend colors for dashboard/grids */
-    .legend-color.available { background: var(--accent-success); }
-    .legend-color.booked { background: var(--accent-danger); }
-    .legend-color.partial { background: var(--accent-warning); }
-    .legend-color.maintenance { background: #8b5cf6; }
-    .legend-color.checked-in { background: #d1fae5; border: 1px solid #10b981; }
-    .legend-color.checked-out { background: #e5e7eb; border: 1px solid #6b7280; }
-    .legend-color.pending { background: #fef3c7; border: 1px solid #f59e0b; }
-
-    /* ═══════════════════════════════════════════════════════════════
-       SECTION 7: PRINT STYLES
-       ═══════════════════════════════════════════════════════════════ */
-    @media print {
-      /* Hide everything on the page */
-      html, body {
-        margin: 0 !important;
-        padding: 0 !important;
-        background: white !important;
-        overflow: visible !important;
-        height: auto !important;
-      }
-      
-      /* Hide scrollbars */
-      *::-webkit-scrollbar {
-        display: none !important;
-        width: 0 !important;
-        height: 0 !important;
-      }
-      
-      * {
-        scrollbar-width: none !important;
-        -ms-overflow-style: none !important;
-      }
-      
-      body > *:not(#registrationFormPreviewModal) {
-        display: none !important;
-        visibility: hidden !important;
-      }
-
-      /* Show the modal */
-      #registrationFormPreviewModal {
-        display: block !important;
-        position: static !important;
-        top: 0 !important;
-        left: 0 !important;
-        width: 100% !important;
-        height: auto !important;
-        background: white !important;
-        margin: 0 !important;
-        padding: 0 !important;
-        overflow: visible !important;
-        z-index: 1 !important;
-      }
-      
-      #formPreviewContent {
-        display: block !important;
-        width: 100% !important;
-        height: auto !important;
-        margin: 0 !important;
-        padding: 0 !important;
-        background: white !important;
-        overflow: visible !important;
-        max-width: none !important;
-        box-shadow: none !important;
-      }
-
-      .registration-form-page {
-        display: block !important;
-        width: 100% !important;
-        max-width: 100% !important;
-        height: auto !important;
-        margin: 0 !important;
-        padding: 0.15in 0.2in !important;
-        background: white !important;
-        box-sizing: border-box !important;
-        overflow: visible !important;
-        box-shadow: none !important;
-        border: none !important;
-        font-size: 12px !important;
-        page-break-inside: avoid !important;
-      }
-
-      /* Hide modal footer buttons */
-      #registrationFormPreviewModal .modal-footer,
-      .modal-footer {
-        display: none !important;
-      }
-
-      /* Page setup - Letter size with small margins */
-      @page {
-        size: letter portrait;
-        margin: 0.2in;
-      }
-    }
-
-    /* Registration Form Preview - Screen display */
-    #registrationFormPreviewModal {
-      overflow-y: auto !important;
-      overflow-x: hidden !important;
-      display: none;
-    }
-
-    #registrationFormPreviewModal.show,
-    #registrationFormPreviewModal[style*="display: block"],
-    #registrationFormPreviewModal[style*="display:block"] {
-      display: block !important;
-    }
-
-    #formPreviewContent {
-      background: white !important;
-      padding: 0 !important;
-      margin: 30px auto !important;
-      border: none !important;
-      max-width: 8.5in !important;
-      width: 95% !important;
-      overflow: hidden !important;
-      border-radius: 8px !important;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.15) !important;
-    }
-
-    .registration-form-page {
-      background: white;
-      overflow: hidden !important;
-      max-width: 100% !important;
-      width: 100% !important;
-    }
-
-    /* Modal footer for registration form */
-    #registrationFormPreviewModal .modal-footer {
-      background: #f5f5f5;
-      padding: 15px 20px;
-      text-align: center;
-      border-top: 1px solid #ddd;
-      margin: 0 auto 30px auto;
-      max-width: 8in;
-      width: 90%;
-      border-radius: 0 0 8px 8px;
-      box-sizing: border-box;
-    }
-
-    /* ═══════════════════════════════════════════════════════════════
-       SECTION 7.5: FLEXBOX UTILITY CLASSES
-       ═══════════════════════════════════════════════════════════════ */
-    
-    /* Flex Container Utilities */
-    .flex { display: flex; }
-    .inline-flex { display: inline-flex; }
-    .flex-col { flex-direction: column; }
-    .flex-row { flex-direction: row; }
-    .flex-wrap { flex-wrap: wrap; }
-    .flex-nowrap { flex-wrap: nowrap; }
-    
-    /* Justify Content */
-    .justify-start { justify-content: flex-start; }
-    .justify-end { justify-content: flex-end; }
-    .justify-center { justify-content: center; }
-    .justify-between { justify-content: space-between; }
-    .justify-around { justify-content: space-around; }
-    .justify-evenly { justify-content: space-evenly; }
-    
-    /* Align Items */
-    .items-start { align-items: flex-start; }
-    .items-end { align-items: flex-end; }
-    .items-center { align-items: center; }
-    .items-baseline { align-items: baseline; }
-    .items-stretch { align-items: stretch; }
-    
-    /* Align Self */
-    .self-start { align-self: flex-start; }
-    .self-end { align-self: flex-end; }
-    .self-center { align-self: center; }
-    .self-stretch { align-self: stretch; }
-    
-    /* Flex Grow/Shrink */
-    .flex-1 { flex: 1 1 0%; }
-    .flex-auto { flex: 1 1 auto; }
-    .flex-initial { flex: 0 1 auto; }
-    .flex-none { flex: none; }
-    .grow { flex-grow: 1; }
-    .grow-0 { flex-grow: 0; }
-    .shrink { flex-shrink: 1; }
-    .shrink-0 { flex-shrink: 0; }
-    
-    /* Gap Utilities */
-    .gap-0 { gap: 0; }
-    .gap-1 { gap: 4px; }
-    .gap-2 { gap: 8px; }
-    .gap-3 { gap: 12px; }
-    .gap-4 { gap: 16px; }
-    .gap-5 { gap: 20px; }
-    .gap-6 { gap: 24px; }
-    .gap-8 { gap: 32px; }
-    
-    /* Spacing Utilities */
-    .m-0 { margin: 0; }
-    .m-1 { margin: 4px; }
-    .m-2 { margin: 8px; }
-    .m-3 { margin: 12px; }
-    .m-4 { margin: 16px; }
-    .mt-2 { margin-top: 8px; }
-    .mt-4 { margin-top: 16px; }
-    .mb-2 { margin-bottom: 8px; }
-    .mb-4 { margin-bottom: 16px; }
-    .mx-auto { margin-left: auto; margin-right: auto; }
-    
-    .p-0 { padding: 0; }
-    .p-1 { padding: 4px; }
-    .p-2 { padding: 8px; }
-    .p-3 { padding: 12px; }
-    .p-4 { padding: 16px; }
-    .p-6 { padding: 24px; }
-    
-    /* Width Utilities */
-    .w-full { width: 100%; }
-    .w-auto { width: auto; }
-    .max-w-sm { max-width: 384px; }
-    .max-w-md { max-width: 448px; }
-    .max-w-lg { max-width: 512px; }
-    .max-w-xl { max-width: 576px; }
-    .max-w-full { max-width: 100%; }
-    
-    /* Display Utilities */
-    .hidden { display: none; }
-    .block { display: block; }
-    .inline-block { display: inline-block; }
-    
-    /* Text Utilities */
-    .text-sm { font-size: 0.875rem; }
-    .text-base { font-size: 1rem; }
-    .text-lg { font-size: 1.125rem; }
-    .text-xl { font-size: 1.25rem; }
-    .text-2xl { font-size: 1.5rem; }
-    .font-medium { font-weight: 500; }
-    .font-semibold { font-weight: 600; }
-    .font-bold { font-weight: 700; }
-    
-    /* Improved Card Layouts */
-    .card-grid {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 16px;
-    }
-    
-    .card-grid > * {
-      flex: 1 1 300px;
-      min-width: 0;
-    }
-    
-    /* Form Layouts with Flexbox */
-    .form-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 16px;
-      margin-bottom: 16px;
-    }
-    
-    .form-row > .form-group {
-      flex: 1 1 200px;
-      min-width: 0;
-    }
-    
-    .form-actions {
-      display: flex;
-      justify-content: flex-end;
-      gap: 12px;
-      margin-top: 24px;
-      padding-top: 16px;
-      border-top: 1px solid var(--border-light);
-    }
-    
-    /* Improved Modal Footer */
-    .modal-footer {
-      display: flex;
-      justify-content: flex-end;
-      gap: 12px;
-      padding: 16px 24px;
-      border-top: 1px solid var(--border-light);
-      margin-top: auto;
-    }
-    
-    /* Table Container with Scroll */
-    .table-container {
-      display: flex;
-      flex-direction: column;
-      overflow-x: auto;
-    }
-    
-    /* Action Button Groups */
-    .btn-group {
-      display: inline-flex;
-      gap: 0;
-    }
-    
-    .btn-group > .btn {
-      border-radius: 0;
-    }
-    
-    .btn-group > .btn:first-child {
-      border-radius: var(--radius-md) 0 0 var(--radius-md);
-    }
-    
-    .btn-group > .btn:last-child {
-      border-radius: 0 var(--radius-md) var(--radius-md) 0;
-    }
-    
-    /* Improved Data Table */
-    .data-table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 0.875rem;
-    }
-    
-    .data-table th,
-    .data-table td {
-      padding: 12px 16px;
-      text-align: left;
-      border-bottom: 1px solid var(--border-light);
-    }
-    
-    .data-table th {
-      background: var(--bg-tertiary);
-      font-weight: 600;
-      color: var(--text-secondary);
-      font-size: 0.75rem;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-    
-    .data-table tbody tr:hover {
-      background: var(--bg-tertiary);
-    }
-    
-    /* Empty State */
-    .empty-state {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      padding: 48px 24px;
-      text-align: center;
-      color: var(--text-muted);
-    }
-    
-    .empty-state .material-icons {
-      font-size: 48px;
-      margin-bottom: 16px;
-      opacity: 0.5;
-    }
-    
-    /* Pagination */
-    .pagination {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      padding: 16px;
-    }
-    
-    /* ═══════════════════════════════════════════════════════════════
-       SECTION 8: RESPONSIVE - MOBILE FIRST APPROACH
-       ═══════════════════════════════════════════════════════════════ */
-    
-    /* Tablet breakpoint */
-    @media (max-width: 1024px) {
-      .dashboard-grid {
-        grid-template-columns: 1fr;
-      }
-      
-      .header-content {
-        padding: 12px 16px;
-      }
-      
-      .nav-actions {
-        order: 3;
-        width: 100%;
-        justify-content: center;
-        flex-wrap: wrap;
-      }
-    }
-
-    /* Mobile breakpoint */
-    @media (max-width: 768px) {
-      /* Header restructure for mobile */
-      .header-content {
-        flex-direction: column;
-        gap: 12px;
-        padding: 12px;
-      }
-      
-      .brand {
-        width: 100%;
-        justify-content: center;
-      }
-      
-      .brand-title {
-        font-size: 1.1rem;
-      }
-      
-      .brand-sub {
-        display: none;
-      }
-
-      .nav-actions {
-        width: 100%;
-        justify-content: center;
-        gap: 6px;
-        flex-wrap: wrap;
-      }
-      
-      .nav-actions .btn {
-        padding: 8px 10px;
-        font-size: 0.75rem;
-      }
-      
-      .nav-actions .btn .material-icons {
-        font-size: 16px;
-      }
-      
-      /* Hide button text on mobile, show only icons */
-      .nav-actions .btn span:not(.material-icons) {
-        display: none;
-      }
-
-      .header-controls {
-        width: 100%;
-        justify-content: center;
-        gap: 6px;
-        flex-wrap: wrap;
-        order: 4;
-      }
-      
-      .header-controls .btn {
-        padding: 8px 10px;
-        font-size: 0.75rem;
-      }
-      
-      .header-controls .btn span:not(.material-icons) {
-        display: none;
-      }
-
-      /* Stats grid mobile */
-      .stats-grid {
-        grid-template-columns: repeat(2, 1fr);
-        gap: 10px;
-      }
-
-      .stat-card {
-        padding: 12px;
-      }
-      
-      .stat-value {
-        font-size: 1.25rem;
-      }
-      
-      .stat-label {
-        font-size: 0.85rem;
-      }
-      
-      .stat-icon {
-        width: 36px;
-        height: 36px;
-      }
-      
-      .stat-icon .material-icons {
-        font-size: 18px;
-      }
-
-      /* Quick actions mobile */
-      .quick-actions-grid {
-        grid-template-columns: repeat(2, 1fr);
-        gap: 8px;
-      }
-      
-      .quick-action-btn {
-        padding: 12px 8px;
-        font-size: 0.75rem;
-      }
-      
-      .quick-action-btn .material-icons {
-        font-size: 20px;
-      }
-
-      /* Dashboard padding */
-      .dashboard {
-        padding: 12px;
-      }
-
-      /* Calendar mobile */
-      .calendar-grid {
-        font-size: 0.65rem;
-      }
-
-      .calendar-day {
-        min-height: 50px;
-        padding: 4px;
-      }
-      
-      .room-block {
-        font-size: 0.6rem;
-        padding: 2px 4px;
-      }
-
-      /* Panels */
-      .panel-header {
-        padding: 12px;
-      }
-      
-      .panel-body {
-        padding: 12px;
-      }
-      
-      .panel-title {
-        font-size: 0.9rem;
-      }
-
-      /* Room status grid */
-      .room-status-grid {
-        grid-template-columns: repeat(3, 1fr);
-        gap: 8px;
-      }
-      
-      .room-card {
-        padding: 10px;
-      }
-      
-      .room-number {
-        font-size: 1rem;
-      }
-
-      /* Modals mobile */
-      .modal-content {
-        width: 95vw !important;
-        max-width: 95vw !important;
-        max-height: 90vh;
-        margin: 5vh auto;
-        padding: 16px;
-        border-radius: 12px;
-      }
-      
-      .modal-lg {
-        width: 95vw !important;
-      }
-      
-      .modal-header-centered {
-        font-size: 1.1rem;
-      }
-
-      /* Form groups mobile */
-      .form-group {
-        margin-bottom: 12px;
-      }
-      
-      .form-group label {
-        font-size: 0.8rem;
-      }
-      
-      .form-group input,
-      .form-group select,
-      .form-group textarea {
-        padding: 10px;
-        font-size: 16px; /* Prevent zoom on iOS */
-      }
-
-      /* Filter panels */
-      .filter-panel {
-        flex-direction: column;
-        gap: 10px;
-      }
-      
-      .filter-group {
-        width: 100%;
-      }
-
-      /* Tables mobile - horizontal scroll */
-      .results-container {
-        overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
-      }
-      
-      .data-table {
-        min-width: 600px;
-      }
-      
-      .data-table th,
-      .data-table td {
-        padding: 8px 10px;
-        font-size: 0.75rem;
-      }
-
-      /* Buttons mobile */
-      .btn {
-        padding: 10px 14px;
-        font-size: 0.8rem;
-      }
-      
-      .modal-footer {
-        flex-direction: column;
-        gap: 8px;
-      }
-      
-      .modal-footer .btn {
-        width: 100%;
-        justify-content: center;
-      }
-
-      /* User menu mobile */
-      .user-dropdown {
-        right: -50px;
-        min-width: 200px;
-      }
-    }
-
-    /* Small phone breakpoint */
-    @media (max-width: 480px) {
-      .stats-grid {
-        grid-template-columns: 1fr;
-        gap: 8px;
-      }
-
-      .stat-card {
-        padding: 12px;
-        flex-direction: row;
-        justify-content: space-between;
-        align-items: center;
-      }
-      
-      .stat-card-header {
-        order: 1;
-      }
-      
-      .stat-value {
-        font-size: 1.5rem;
-        order: 2;
-      }
-      
-      .stat-label {
-        position: absolute;
-        left: 56px;
-        font-size: 0.85rem;
-      }
-
-      /* Quick actions single column */
-      .quick-actions-grid {
-        grid-template-columns: 1fr;
-      }
-      
-      .quick-action-btn {
-        flex-direction: row;
-        justify-content: flex-start;
-        gap: 12px;
-        padding: 14px 16px;
-      }
-
-      /* Room status 2 columns */
-      .room-status-grid {
-        grid-template-columns: repeat(2, 1fr);
-      }
-
-      /* Header controls - icon only */
-      .header-controls .btn {
-        padding: 8px;
-      }
-      
-      .nav-actions .btn {
-        padding: 8px;
-      }
-
-      /* Reduce modal padding */
-      .modal-content {
-        padding: 12px;
-      }
-
-      /* Calendar extra small */
-      .calendar-day {
-        min-height: 40px;
-        font-size: 0.6rem;
-      }
-    }
-
-    /* Touch-friendly improvements */
-    @media (hover: none) and (pointer: coarse) {
-      .btn,
-      .quick-action-btn,
-      .room-card,
-      .dropdown-item {
-        min-height: 44px; /* iOS minimum touch target */
-      }
-      
-      .btn-icon {
-        min-width: 44px;
-        min-height: 44px;
-      }
-      
-      /* Increase tap targets */
-      .data-table td {
-        padding: 12px 10px;
-      }
-      
-      /* Disable hover effects on touch */
-      .btn:hover,
-      .quick-action-btn:hover {
-        transform: none;
-      }
-    }
-
-    /* Landscape phone */
-    @media (max-width: 768px) and (orientation: landscape) {
-      .modal-content {
-        max-height: 85vh;
-        margin: 2vh auto;
-      }
-      
-      .stats-grid {
-        grid-template-columns: repeat(3, 1fr);
-      }
-    }
-
-    /* Print styles */
-    @media print {
-      .gh-header,
-      .nav-actions,
-      .header-controls,
-      .modal,
-      .btn {
-        display: none !important;
-      }
-      
-      .dashboard {
-        padding: 0;
-      }
-      
-      .stat-card,
-      .panel {
-        break-inside: avoid;
-      }
-    }
-  </style>
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       EXTERNAL STYLESHEET - Separated for maintainability
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <link rel="stylesheet" href="css/main.css">
 </head>
 <body data-theme="light">
+
+  <!-- Skip to main content - WCAG 2.4.1 -->
+  <a href="#main-content" class="skip-link">Skip to main content</a>
+
+  <!-- ARIA live region for dynamic announcements -->
+  <div id="ariaLiveRegion" class="aria-live-region" aria-live="polite" aria-atomic="true"></div>
 
   <!-- ═══════════════════════════════════════════════════════════════
        AUTH LOADING OVERLAY - Shown until authentication is verified
        ═══════════════════════════════════════════════════════════════ -->
-  <div class="auth-loading-overlay" id="authLoadingOverlay">
+  <div class="auth-loading-overlay" id="authLoadingOverlay" role="status" aria-label="Verifying authentication">
     <div class="auth-loading-logo">
-      <span class="material-icons">hotel</span>
+      <span class="material-icons" aria-hidden="true">hotel</span>
     </div>
-    <div class="auth-loading-spinner"></div>
+    <div class="auth-loading-spinner" aria-hidden="true"></div>
     <p class="auth-loading-text">Verifying authentication...</p>
   </div>
 
   <!-- ═══════════════════════════════════════════════════════════════
        HEADER
        ═══════════════════════════════════════════════════════════════ -->
-  <header class="gh-header">
+  <header class="gh-header" role="banner">
     <div class="header-content">
       <div class="brand">
-        <div class="brand-icon">
+        <div class="brand-icon" aria-hidden="true">
           <span class="material-icons">hotel</span>
         </div>
         <div>
@@ -2845,10 +129,10 @@
         </div>
       </div>
 
-      <div class="nav-actions">
+      <nav class="nav-actions" aria-label="Primary actions">
         <!-- PRIMARY ACTIONS -->
         <button id="openAddReservationBtn" class="btn btn-primary">
-          <span class="material-icons">add</span>
+          <span class="material-icons" aria-hidden="true">add</span>
           New Reservation
         </button>
         <button id="checkInOutBtn" class="btn btn-success">
@@ -2862,12 +146,12 @@
           Availability
         </button>
         <button id="searchCustomerBtn" class="btn btn-secondary">
-          <span class="material-icons">person_search</span>
+          <span class="material-icons" aria-hidden="true">person_search</span>
           Guests
         </button>
-      </div>
+      </nav>
 
-      <div class="header-controls">
+      <nav class="header-controls" aria-label="Reports and admin">
         <!-- REPORTS & ADMIN -->
         <button id="summaryBtn" class="btn btn-secondary">
           <span class="material-icons">analytics</span>
@@ -2933,14 +217,14 @@
             </button>
           </div>
         </div>
-      </div>
+      </nav>
     </div>
   </header>
 
   <!-- ═══════════════════════════════════════════════════════════════
        MAIN DASHBOARD
        ═══════════════════════════════════════════════════════════════ -->
-  <main class="dashboard">
+  <main class="dashboard" id="main-content">
     <!-- Stats Cards -->
     <section class="stats-grid">
       <article class="stat-card">
@@ -3194,58 +478,94 @@
        ═══════════════════════════════════════════════════════════════ -->
 
   <!-- 🔲 Add Reservation Modal -->
-  <div id="addReservationModal" class="modal">
-    <div class="modal-content">
-      <span class="close" id="closeAddReservationBtn">&times;</span>
-      <h2>Add Reservation</h2>
+  <div id="addReservationModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="addReservationTitle">
+    <div class="modal-content modal-compact">
+      <button class="close" id="closeAddReservationBtn" aria-label="Close dialog">&times;</button>
+      <h2 id="addReservationTitle">
+        <span class="material-icons" aria-hidden="true">add_circle</span>
+        New Reservation
+      </h2>
 
-      <label for="searchName">Search Customer: </label>
-      <input type="text" id="searchName" placeholder="Start typing name..." autocomplete="off" />
-      <div id="suggestions"></div>
+      <form id="addReservationForm" class="compact-form" novalidate>
+        <!-- Search & ID Preview Row -->
+        <div class="search-row">
+          <div class="compact-group" style="flex:1;">
+            <label for="searchName">Search Customer</label>
+            <input type="text" id="searchName" placeholder="Start typing name..." autocomplete="off" />
+            <div id="suggestions"></div>
+          </div>
+          <div id="customerIdPreview" class="id-preview-inline" title="Customer ID photo">
+            <span class="material-icons" aria-hidden="true">badge</span>
+          </div>
+        </div>
 
-      <div id="customerIdPreview">
-        <span class="text-muted">No ID on file</span>
-      </div>
+        <!-- Guest Information -->
+        <fieldset>
+          <legend><span class="material-icons" aria-hidden="true">person</span> Guest Information</legend>
+          <div class="form-grid">
+            <div class="compact-group">
+              <label for="name">Name <span class="sr-only">(required)</span></label>
+              <input type="text" id="name" required minlength="2" maxlength="100" placeholder="Full name" autocomplete="off" aria-required="true" />
+            </div>
+            <div class="compact-group">
+              <label for="telephone">Telephone <span class="sr-only">(required)</span></label>
+              <input type="tel" id="telephone" required minlength="7" maxlength="20" pattern="[0-9+\-()\\s]{7,20}" placeholder="e.g. 1-767-555-1234" title="Enter a valid phone number" autocomplete="off" aria-required="true" />
+            </div>
+            <div class="compact-group">
+              <label for="address">Address <span class="sr-only">(required)</span></label>
+              <input type="text" id="address" required minlength="3" maxlength="200" placeholder="Full address" autocomplete="off" aria-required="true" />
+            </div>
+            <div class="compact-group">
+              <label for="customer-email">Email <span class="sr-only">(required)</span></label>
+              <input type="email" id="customer-email" required maxlength="254" placeholder="email@example.com" autocomplete="off" aria-required="true" />
+            </div>
+          </div>
+        </fieldset>
 
-      <label for="name">Name:</label>
-      <input type="text" id="name" required minlength="2" maxlength="100" placeholder="Full name" autocomplete="off" />
+        <!-- Stay Details -->
+        <fieldset>
+          <legend><span class="material-icons" aria-hidden="true">event</span> Stay Details</legend>
+          <div class="form-grid">
+            <div class="compact-group">
+              <label for="arrival">Arrival Date <span class="sr-only">(required)</span></label>
+              <input type="date" id="arrival" required aria-required="true" />
+            </div>
+            <div class="compact-group">
+              <label for="departure">Departure Date <span class="sr-only">(required)</span></label>
+              <input type="date" id="departure" required aria-required="true" />
+            </div>
+            <div class="compact-group">
+              <label for="room">Room Number <span class="sr-only">(required)</span></label>
+              <input type="text" id="room" required aria-required="true" />
+            </div>
+            <div class="compact-group">
+              <label for="reservationRate">Rate per Night ($) <span class="sr-only">(required)</span></label>
+              <input type="number" id="reservationRate" min="0" step="0.01" required aria-required="true" />
+            </div>
+            <div class="compact-group full-width">
+              <label for="reservationNote">Note</label>
+              <textarea id="reservationNote" placeholder="Special requests, notes..." rows="2"></textarea>
+            </div>
+          </div>
+        </fieldset>
 
-      <label for="address">Address:</label>
-      <input type="text" id="address" required minlength="3" maxlength="200" placeholder="Full address" autocomplete="off" />
-
-      <label for="telephone">Telephone:</label>
-      <input type="tel" id="telephone" required minlength="7" maxlength="20" pattern="[0-9+\-()\s]{7,20}" placeholder="e.g. 1-767-555-1234" title="Enter a valid phone number (digits, +, -, spaces, parentheses)" autocomplete="off" />
-
-      <label for="customer-email">Email:</label>
-      <input type="email" id="customer-email" required maxlength="254" placeholder="email@example.com" autocomplete="off" />
-
-      <label for="arrival">Arrival Date: </label>
-      <input type="date" id="arrival" required />
-
-      <label for="departure">Departure Date:</label>
-      <input type="date" id="departure" required />
-
-      <label for="room">Room Number:</label>
-      <input type="text" id="room" required />
-
-      <label for="reservationRate">Rate per Night:</label>
-      <input type="number" id="reservationRate" min="0" step="0.01" required />
-
-      <label for="reservationNote">Note:</label>
-      <textarea id="reservationNote" placeholder="Enter any special notes..." rows="3"></textarea>
-
-      <div class="modal-footer">
-        <button id="clearReservationFormBtn" class="btn btn-danger">🧹 Clear Form</button>
-        <button type="submit" id="saveReservationBtn" class="btn btn-primary">💾 Save</button>
-      </div>
+        <div class="modal-footer">
+          <button type="button" id="clearReservationFormBtn" class="btn btn-danger">
+            <span class="material-icons" aria-hidden="true">clear_all</span> Clear
+          </button>
+          <button type="submit" id="saveReservationBtn" class="btn btn-primary">
+            <span class="material-icons" aria-hidden="true">save</span> Save Reservation
+          </button>
+        </div>
+      </form>
     </div>
   </div>
 
   <!-- 📊 Availability Grid Modal -->
-  <div id="availabilityModal" class="modal">
+  <div id="availabilityModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="availabilityTitle">
     <div class="modal-content modal-lg">
-      <span class="close" id="closeAvailabilityBtn">&times;</span>
-      <h2>Availability Grid</h2>
+      <button class="close" id="closeAvailabilityBtn" aria-label="Close dialog">&times;</button>
+      <h2 id="availabilityTitle"><span class="material-icons" aria-hidden="true">calendar_month</span> Availability Grid</h2>
       <div class="filter-panel">
         <div class="filter-group">
           <label for="startDate">Start Date:</label>
@@ -3271,58 +591,76 @@
   </div>
 
   <!-- ✏️ Edit Customer Modal -->
-  <div id="editCustomerModal" class="modal">
-    <div class="modal-content">
-      <span class="close" id="closeEditCustomerBtn">&times;</span>
-      <h3>Edit Customer Information</h3>
+  <div id="editCustomerModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="editCustomerTitle">
+    <div class="modal-content modal-compact">
+      <button class="close" id="closeEditCustomerBtn" aria-label="Close dialog">&times;</button>
+      <h3 id="editCustomerTitle">
+        <span class="material-icons" aria-hidden="true">edit</span>
+        Edit Customer Information
+      </h3>
 
-      <label for="editCustomerName">Name:</label>
-      <input type="text" id="editCustomerName" minlength="2" maxlength="100" />
+      <form id="editCustomerForm" class="compact-form" novalidate>
+        <fieldset>
+          <legend><span class="material-icons" aria-hidden="true">person</span> Contact Details</legend>
+          <div class="form-grid">
+            <div class="compact-group">
+              <label for="editCustomerName">Name</label>
+              <input type="text" id="editCustomerName" minlength="2" maxlength="100" />
+            </div>
+            <div class="compact-group">
+              <label for="editCustomerPhone">Telephone</label>
+              <input type="tel" id="editCustomerPhone" minlength="7" maxlength="20" pattern="[0-9+\-()\s]{7,20}" title="Enter a valid phone number" />
+            </div>
+            <div class="compact-group">
+              <label for="editCustomerAddress">Address</label>
+              <input type="text" id="editCustomerAddress" minlength="3" maxlength="200" />
+            </div>
+            <div class="compact-group">
+              <label for="editCustomerEmail">Email</label>
+              <input type="email" id="editCustomerEmail" maxlength="254" />
+            </div>
+          </div>
+        </fieldset>
 
-      <label for="editCustomerPhone">Telephone:</label>
-      <input type="tel" id="editCustomerPhone" minlength="7" maxlength="20" pattern="[0-9+\-()\s]{7,20}" title="Enter a valid phone number" />
+        <fieldset>
+          <legend><span class="material-icons" aria-hidden="true">badge</span> Customer ID</legend>
+          <div id="editCustomerIdPreview" class="id-preview-inline" style="margin: 0 auto 8px;"></div>
+          <input type="file" id="editCustomerIdInput" accept="image/*" class="sr-only" aria-label="Upload customer ID image" />
+          <button type="button" id="editCustomerIdBtn" class="btn btn-secondary" style="width: 100%;">
+            <span class="material-icons" aria-hidden="true">photo_camera</span> Change ID Image
+          </button>
+        </fieldset>
 
-      <label for="editCustomerAddress">Address:</label>
-      <input type="text" id="editCustomerAddress" minlength="3" maxlength="200" />
-
-      <label for="editCustomerEmail">Email:</label>
-      <input type="email" id="editCustomerEmail" maxlength="254" />
-
-      <!-- ID Image Section -->
-      <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border-light, #e2e8f0);">
-        <label>Customer ID:</label>
-        <div id="editCustomerIdPreview" style="margin: 8px 0; text-align: center;">
-          <!-- JS will populate with current ID image or placeholder -->
+        <div class="modal-footer">
+          <button type="button" id="cancelCustomerEditBtn" class="btn btn-secondary">Cancel</button>
+          <button type="submit" id="saveCustomerEditBtn" class="btn btn-primary">
+            <span class="material-icons" aria-hidden="true">save</span> Save
+          </button>
         </div>
-        <input type="file" id="editCustomerIdInput" accept="image/*" style="display: none;" />
-        <button type="button" id="editCustomerIdBtn" class="btn btn-secondary" style="width: 100%;">
-          📷 Change ID Image
-        </button>
-      </div>
-
-      <div class="modal-footer">
-        <button id="saveCustomerEditBtn" class="btn btn-primary">💾 Save</button>
-        <button id="cancelCustomerEditBtn" class="btn btn-secondary">Cancel</button>
-      </div>
+      </form>
     </div>
   </div>
 
   <!-- ✏️ Edit/Delete Popup Modal -->
-  <div id="editDeletePopup" class="modal">
+  <div id="editDeletePopup" class="modal" role="dialog" aria-modal="true" aria-label="Reservation details">
     <div class="modal-content" id="editDeleteContent">
-      <button id="printReservationBtn" class="btn btn-secondary">🖨️ Print Reservation Form</button>
-      <button id="openExtendReservationBtn" class="btn btn-secondary">➕ Extend Reservation</button>
+      <button id="printReservationBtn" class="btn btn-secondary">
+        <span class="material-icons" aria-hidden="true">print</span> Print Reservation Form
+      </button>
+      <button id="openExtendReservationBtn" class="btn btn-secondary">
+        <span class="material-icons" aria-hidden="true">update</span> Extend Reservation
+      </button>
     </div>
   </div>
 
   <!-- 🛌 Extend Reservation Modal -->
 
   <!-- 🏠 In-House Guests Modal (for Extend Stay flow) -->
-  <div id="inHouseGuestsModal" class="modal" style="z-index: 2100;">
+  <div id="inHouseGuestsModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="inHouseGuestsTitle" style="z-index: 2100;">
     <div class="modal-content modal-scrollable" style="max-width:550px;">
-      <span class="close" id="closeInHouseGuestsBtn">&times;</span>
-      <h3 style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
-        <span class="material-icons" style="color:var(--accent-success);">hotel</span>
+      <button class="close" id="closeInHouseGuestsBtn" aria-label="Close dialog">&times;</button>
+      <h3 id="inHouseGuestsTitle" style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+        <span class="material-icons" aria-hidden="true" style="color:var(--accent-success);">hotel</span>
         In-House Guests
       </h3>
       <p style="margin:0 0 16px; font-size:0.85em; color:var(--text-muted);">
@@ -3338,58 +676,68 @@
     </div>
   </div>
 
-  <div id="extendReservationModal" class="modal" style="z-index: 2200;">
-    <div class="modal-content">
-      <span class="close" id="closeExtendReservationBtn">&times;</span>
-      <h3 style="display:flex; align-items:center; gap:8px;">
-        <span class="material-icons">event_available</span>
+  <div id="extendReservationModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="extendResTitle" style="z-index: 2200;">
+    <div class="modal-content modal-compact">
+      <button class="close" id="closeExtendReservationBtn" aria-label="Close dialog">&times;</button>
+      <h3 id="extendResTitle" style="display:flex; align-items:center; gap:8px;">
+        <span class="material-icons" aria-hidden="true">event_available</span>
         Extend Reservation
       </h3>
 
-      <div style="background:var(--bg-tertiary); padding:12px; border-radius:8px; margin-bottom:16px;">
-        <p style="margin:0; font-size:0.9em; color:var(--text-muted);">
+      <div style="background:var(--bg-tertiary); padding:8px 12px; border-radius:8px; margin-bottom:12px;">
+        <p style="margin:0; font-size:0.82em; color:var(--text-muted);">
           <strong>Note:</strong> The rate applies to the entire stay (original + extension).
         </p>
       </div>
 
-      <label for="extendDeparture">New Departure Date:</label>
-      <input type="date" id="extendDeparture" required />
+      <form id="extendReservationForm" class="compact-form" novalidate>
+        <div class="form-grid">
+          <div class="compact-group">
+            <label for="extendDeparture">New Departure Date</label>
+            <input type="date" id="extendDeparture" required aria-required="true" />
+          </div>
+          <div class="compact-group">
+            <label for="extendPaymentRate">Rate per Night ($)</label>
+            <input type="number" id="extendPaymentRate" placeholder="Rate per night" step="0.01" min="0" />
+          </div>
+          <div class="compact-group">
+            <label for="extendPaymentAmount">Amount Being Paid ($)</label>
+            <input type="number" id="extendPaymentAmount" placeholder="Payment amount" step="0.01" min="0" />
+          </div>
+          <div class="compact-group">
+            <label for="extendPaymentMethod">Payment Method</label>
+            <select id="extendPaymentMethod">
+              <option value="cash">Cash</option>
+              <option value="card">Card</option>
+              <option value="cheque">Cheque</option>
+              <option value="mobile">Mobile Banking</option>
+            </select>
+          </div>
+          <div class="compact-group full-width">
+            <label for="extendReceiptNumber">Receipt Number (Auto)</label>
+            <input type="text" id="extendReceiptNumber" readonly style="background:var(--bg-tertiary); color:var(--text-muted);" />
+          </div>
+        </div>
 
-      <label for="extendPaymentRate">Rate per Night ($):</label>
-      <input type="number" id="extendPaymentRate" placeholder="Rate per night" step="0.01" min="0" />
-
-      <label for="extendPaymentAmount">Amount Being Paid ($):</label>
-      <input type="number" id="extendPaymentAmount" placeholder="Payment amount" step="0.01" min="0" />
-
-      <label for="extendPaymentMethod">Payment Method:</label>
-      <select id="extendPaymentMethod">
-        <option value="cash">Cash</option>
-        <option value="card">Card</option>
-        <option value="cheque">Cheque</option>
-        <option value="mobile">Mobile Banking</option>
-      </select>
-
-      <label for="extendReceiptNumber">Receipt Number (Auto):</label>
-      <input type="text" id="extendReceiptNumber" readonly style="background:var(--bg-tertiary); color:var(--text-muted);" />
-
-      <div class="modal-footer" style="display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end;">
-        <button id="cancelExtendReservationBtn" class="btn btn-secondary">Cancel</button>
-        <button id="confirmExtendReservationBtn" class="btn btn-primary">
-          <span class="material-icons" style="font-size:18px; vertical-align:middle;">save</span>
-          Confirm Extension
-        </button>
-        <button id="confirmExtendAndPrintBtn" class="btn btn-primary" style="background:var(--accent-success);">
-          <span class="material-icons" style="font-size:18px; vertical-align:middle;">print</span>
-          Confirm & Print
-        </button>
-      </div>
+        <div class="modal-footer">
+          <button type="button" id="cancelExtendReservationBtn" class="btn btn-secondary">Cancel</button>
+          <button type="submit" id="confirmExtendReservationBtn" class="btn btn-primary">
+            <span class="material-icons" aria-hidden="true" style="font-size:18px;">save</span>
+            Confirm Extension
+          </button>
+          <button type="button" id="confirmExtendAndPrintBtn" class="btn btn-primary" style="background:var(--accent-success);">
+            <span class="material-icons" aria-hidden="true" style="font-size:18px;">print</span>
+            Confirm & Print
+          </button>
+        </div>
+      </form>
     </div>
   </div>
 
   <!-- 💳 Payment Prompt Modal -->
-  <div id="paymentPromptModal" class="modal">
-    <div class="modal-content">
-      <span class="close" id="closePaymentPromptBtn">&times;</span>
+  <div id="paymentPromptModal" class="modal" role="dialog" aria-modal="true" aria-label="Payment prompt">
+    <div class="modal-content modal-sm">
+      <button class="close" id="closePaymentPromptBtn" aria-label="Close dialog">&times;</button>
       <h3>Would you like to make a payment now?</h3>
       <div class="modal-footer">
         <button id="yesPaymentBtn" class="btn btn-primary">Yes</button>
@@ -3399,10 +747,10 @@
   </div>
 
   <!-- 💰 Add Payment Modal -->
-  <div id="addPaymentModal" class="modal">
-    <div class="modal-content">
-      <span class="close" id="closeAddPaymentBtn">&times;</span>
-      <h3>Make a Payment</h3>
+  <div id="addPaymentModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="addPaymentTitle">
+    <div class="modal-content modal-compact">
+      <button class="close" id="closeAddPaymentBtn" aria-label="Close dialog">&times;</button>
+      <h3 id="addPaymentTitle"><span class="material-icons" aria-hidden="true">payments</span> Make a Payment</h3>
 
       <label for="paymentAmount">Amount: </label>
       <input type="number" id="paymentAmount" step="0.01" placeholder="Enter amount" />
@@ -3426,10 +774,10 @@
   </div>
 
   <!-- 📊 Summary Modal -->
-  <div id="summaryModal" class="modal">
+  <div id="summaryModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="summaryTitle">
     <div class="modal-content modal-lg modal-scrollable">
-      <span id="closeSummaryModal" class="close">&times;</span>
-      <h2>Reservation / Payment Summary</h2>
+      <button id="closeSummaryModal" class="close" aria-label="Close dialog">&times;</button>
+      <h2 id="summaryTitle"><span class="material-icons" aria-hidden="true">analytics</span> Reservation / Payment Summary</h2>
 
       <div class="filter-panel">
         <div class="filter-group">
@@ -3485,10 +833,10 @@
   </div>
 
   <!-- 🧾 Manage Payment Modal -->
-  <div id="managePaymentModal" class="modal">
+  <div id="managePaymentModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="managePaymentTitle">
     <div class="modal-content">
-      <span class="close" id="closeManagePaymentBtn">&times;</span>
-      <h3>Manage Payments</h3>
+      <button class="close" id="closeManagePaymentBtn" aria-label="Close dialog">&times;</button>
+      <h3 id="managePaymentTitle"><span class="material-icons" aria-hidden="true">account_balance_wallet</span> Manage Payments</h3>
 
       <div class="payment-box">
         <p><strong>Total Due:</strong> $<span id="totalDue">0</span></p>
@@ -3535,10 +883,10 @@
   </div>
 
   <!-- 🔽 Select Receipt for Email Modal -->
-  <div id="selectReceiptModal" class="modal">
-    <div class="modal-content">
-      <span class="close" id="closeSelectReceiptModalBtn">&times;</span>
-      <h3>Select a Receipt to Email</h3>
+  <div id="selectReceiptModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="selectReceiptTitle">
+    <div class="modal-content modal-sm">
+      <button class="close" id="closeSelectReceiptModalBtn" aria-label="Close dialog">&times;</button>
+      <h3 id="selectReceiptTitle">Select a Receipt to Email</h3>
       <select id="receiptSelectDropdown">
         <option value="">-- Select Receipt --</option>
       </select>
@@ -3550,10 +898,10 @@
   </div>
 
   <!-- 🖨️ Select Receipt for Printing -->
-  <div id="printReceiptModal" class="modal">
-    <div class="modal-content">
-      <span class="close" id="closePrintReceiptModalBtn">&times;</span>
-      <h3>Select Receipt(s) to Print</h3>
+  <div id="printReceiptModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="printReceiptTitle">
+    <div class="modal-content modal-sm">
+      <button class="close" id="closePrintReceiptModalBtn" aria-label="Close dialog">&times;</button>
+      <h3 id="printReceiptTitle">Select Receipt(s) to Print</h3>
       <div id="printReceiptList"></div>
       <div class="modal-footer">
         <button id="confirmPrintReceiptBtn" class="btn btn-primary">🖨️ Print</button>
@@ -3563,10 +911,10 @@
   </div>
 
   <!-- 🔧 Room Info/Maintenance Modal -->
-  <div id="maintenanceModal" class="modal">
+  <div id="maintenanceModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="maintenanceTitle">
     <div class="modal-content modal-sm">
-      <span class="close" id="closeMaintenanceModalBtn">&times;</span>
-      <h3>🚪 Room <span id="maintenanceRoomNumber"></span></h3>
+      <button class="close" id="closeMaintenanceModalBtn" aria-label="Close dialog">&times;</button>
+      <h3 id="maintenanceTitle"><span class="material-icons" aria-hidden="true">door_front</span> Room <span id="maintenanceRoomNumber"></span></h3>
       
       <!-- Guest Info Section (shown when occupied) -->
       <div id="roomGuestInfo" style="display:none; margin-bottom:16px; padding:12px; background:var(--bg-tertiary); border-radius:8px;">
@@ -3592,10 +940,10 @@
   </div>
 
   <!-- 📊 Batch Close History Modal -->
-  <div id="batchCloseHistoryModal" class="modal">
+  <div id="batchCloseHistoryModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="batchCloseHistoryTitle">
     <div class="modal-content modal-lg modal-scrollable">
-      <span class="close" id="closeBatchCloseHistoryModalBtn">&times;</span>
-      <h2 class="modal-header-centered">� Batch Close History</h2>
+      <button class="close" id="closeBatchCloseHistoryModalBtn" aria-label="Close dialog">&times;</button>
+      <h2 id="batchCloseHistoryTitle" class="modal-header-centered"><span class="material-icons" aria-hidden="true">history</span> Batch Close History</h2>
       <p class="text-center text-muted" style="margin-bottom:16px;">View all previous batch close sessions and their details</p>
       
       <!-- Filters -->
@@ -3643,10 +991,10 @@
     </div>
   </div>
   <!-- 📊 Batch Close Report Modal -->
-  <div id="batchCloseModal" class="modal">
+  <div id="batchCloseModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="batchCloseTitle">
     <div class="modal-content modal-lg modal-scrollable">
-      <span class="close" id="closeBatchCloseModalBtn">&times;</span>
-      <h2 class="modal-header-centered">📊 Batch Close Report</h2>
+      <button class="close" id="closeBatchCloseModalBtn" aria-label="Close dialog">&times;</button>
+      <h2 id="batchCloseTitle" class="modal-header-centered"><span class="material-icons" aria-hidden="true">assessment</span> Batch Close Report</h2>
       
       <div class="filter-panel">
         <div class="filter-group">
@@ -3693,10 +1041,10 @@
   <div id="printableInvoiceContainer" style="display:none;"></div>
 
   <!-- 📋 Audit Log Viewer Modal (Admin Security Dashboard) -->
-  <div id="auditLogModal" class="modal">
+  <div id="auditLogModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="auditLogTitle">
     <div class="modal-content modal-lg modal-scrollable">
-      <span class="close" id="closeAuditLogModalBtn">&times;</span>
-      <h2 class="modal-header-centered">🔒 Security Audit Log</h2>
+      <button class="close" id="closeAuditLogModalBtn" aria-label="Close dialog">&times;</button>
+      <h2 id="auditLogTitle" class="modal-header-centered"><span class="material-icons" aria-hidden="true">security</span> Security Audit Log</h2>
       <p class="text-center text-muted" style="margin-bottom:16px;">Track all employee actions for accountability and security monitoring</p>
       
       <div class="filter-panel" style="flex-wrap:wrap;">
@@ -3797,10 +1145,10 @@
   </div>
 
   <!-- 🧾 Print Receipts Modal -->
-  <div id="printReceiptsModal" class="modal">
+  <div id="printReceiptsModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="printReceiptsTitle">
     <div class="modal-content modal-sm">
-      <span class="close" id="closePrintReceiptsModalBtn">&times;</span>
-      <h2 class="modal-header-centered">🧾 Print Receipts</h2>
+      <button class="close" id="closePrintReceiptsModalBtn" aria-label="Close dialog">&times;</button>
+      <h2 id="printReceiptsTitle" class="modal-header-centered"><span class="material-icons" aria-hidden="true">print</span> Print Receipts</h2>
       
       <div class="radio-group">
         <label class="radio-option">
@@ -3842,9 +1190,9 @@
   </div>
 
   <!-- 🏨 Room History Modal -->
-  <div id="roomHistoryModal" class="modal">
+  <div id="roomHistoryModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="roomHistoryTitle">
     <div class="modal-content modal-scrollable" style="max-width:650px;">
-      <span class="close" id="closeRoomHistoryBtn">&times;</span>
+      <button class="close" id="closeRoomHistoryBtn" aria-label="Close dialog">&times;</button>
       <h3 style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
         <span class="material-icons" style="color:#8b5cf6;">history</span>
         Room History
@@ -3880,9 +1228,9 @@
   </div>
 
   <!-- 🔍 Search Customer Modal (Revamped) -->
-  <div id="searchCustomerModal" class="modal">
+  <div id="searchCustomerModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="searchCustomerTitle">
     <div class="modal-content modal-scrollable" style="max-width:600px;">
-      <span class="close" id="closeSearchCustomerBtn">&times;</span>
+      <button class="close" id="closeSearchCustomerBtn" aria-label="Close dialog">&times;</button>
       <h3 style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
         <span class="material-icons" style="color:var(--accent-primary);">person_search</span>
         Guest Directory
@@ -3890,7 +1238,7 @@
       <p style="margin:0 0 12px; font-size:0.82em; color:var(--text-muted);">Search by name or phone &bull; double-click to open</p>
       <div style="position:relative; margin-bottom:14px;">
         <span class="material-icons" style="position:absolute; left:12px; top:50%; transform:translateY(-50%); color:var(--text-muted); font-size:20px;">search</span>
-        <input type="text" id="customerSearchInput" placeholder="Type a name or phone number..." style="padding-left:40px; width:100%; box-sizing:border-box;" />
+        <input type="text" id="customerSearchInput" placeholder="Type a name or phone number..." aria-label="Search guests by name or phone" style="padding-left:40px; width:100%; box-sizing:border-box;" />
       </div>
       <div id="customerSearchCount" style="font-size:0.8em; color:var(--text-muted); margin-bottom:8px;"></div>
       <div id="customerListContainer" style="max-height:55vh; overflow-y:auto; border:1px solid var(--border-light); border-radius:var(--radius-md); background:var(--bg-tertiary);"></div>
@@ -3898,9 +1246,9 @@
   </div>
 
   <!-- 👤 Customer Details Modal (Revamped) -->
-  <div id="customerDetailsModal" class="modal">
+  <div id="customerDetailsModal" class="modal" role="dialog" aria-modal="true" aria-label="Customer details">
     <div class="modal-content" style="max-width:500px;">
-      <span class="close" id="closeCustomerDetailsBtn">&times;</span>
+      <button class="close" id="closeCustomerDetailsBtn" aria-label="Close dialog">&times;</button>
       <div id="customerDetailFields"></div>
       <div class="modal-footer" style="display:flex; gap:8px; flex-wrap:wrap; justify-content:center;">
         <button id="editCustomerBtn" class="btn btn-secondary"><span class="material-icons" style="font-size:16px; vertical-align:middle;">edit</span> Edit</button>
@@ -3911,29 +1259,29 @@
   </div>
 
   <!-- 🧾 Transaction List Modal -->
-  <div id="transactionListModal" class="modal">
+  <div id="transactionListModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="transactionListTitle">
     <div class="modal-content">
-      <span class="close" id="closeTransactionListBtn">&times;</span>
-      <h2>Customer Transactions</h2>
+      <button class="close" id="closeTransactionListBtn" aria-label="Close dialog">&times;</button>
+      <h2 id="transactionListTitle">Customer Transactions</h2>
       <div id="transactionListContainer" class="list-container"></div>
     </div>
   </div>
 
   <!-- 📄 Receipt Detail Modal -->
-  <div id="receiptDetailModal" class="modal">
+  <div id="receiptDetailModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="receiptDetailTitle">
     <div class="modal-content modal-scrollable">
-      <span class="close" id="closeReceiptDetailBtn">&times;</span>
-      <h2>🧾 Receipt Details</h2>
+      <button class="close" id="closeReceiptDetailBtn" aria-label="Close dialog">&times;</button>
+      <h2 id="receiptDetailTitle"><span class="material-icons" aria-hidden="true">receipt</span> Receipt Details</h2>
       <div id="receiptDetailContent"></div>
     </div>
   </div>
 
   <!-- 🔍 Search Receipt Modal -->
-  <div id="searchReceiptModal" class="modal">
+  <div id="searchReceiptModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="searchReceiptTitle">
     <div class="modal-content">
-      <span class="close" id="closeSearchReceiptBtn">&times;</span>
-      <h2>Search Receipt</h2>
-      <input type="text" id="searchReceiptInput" placeholder="Enter receipt number..." maxlength="5" />
+      <button class="close" id="closeSearchReceiptBtn" aria-label="Close dialog">&times;</button>
+      <h2 id="searchReceiptTitle">Search Receipt</h2>
+      <input type="text" id="searchReceiptInput" placeholder="Enter receipt number..." aria-label="Search by receipt number" maxlength="5" />
       <div class="modal-footer">
         <button id="submitSearchReceiptBtn" class="btn btn-primary">🔎 Search</button>
       </div>
@@ -3942,10 +1290,10 @@
   </div>
 
   <!-- 🛎 Check-In/Out Filter Modal -->
-  <div id="checkInOutFilterModal" class="modal">
+  <div id="checkInOutFilterModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="checkInOutFilterTitle">
     <div class="modal-content">
-      <span class="close" id="closeCheckInOutFilterBtn">&times;</span>
-      <h2>Filter: Check-Ins / Check-Outs</h2>
+      <button class="close" id="closeCheckInOutFilterBtn" aria-label="Close dialog">&times;</button>
+      <h2 id="checkInOutFilterTitle">Filter: Check-Ins / Check-Outs</h2>
 
       <div class="radio-group">
         <label class="radio-option">
@@ -3986,9 +1334,9 @@
   </div>
 
   <!-- 🖨️ Registration Form Prompt Modal -->
-  <div id="registrationPromptModal" class="modal">
+  <div id="registrationPromptModal" class="modal" role="dialog" aria-modal="true" aria-label="Registration form prompt">
     <div class="modal-content modal-sm">
-      <span class="close" id="closeRegistrationPromptBtn">&times;</span>
+      <button class="close" id="closeRegistrationPromptBtn" aria-label="Close dialog">&times;</button>
       <h3>Would you like to print the guest registration form?</h3>
       <div class="modal-footer">
         <button id="continueToIdUploadBtn" class="btn btn-success">✅ Yes, Continue</button>
@@ -3998,9 +1346,9 @@
   </div>
 
   <!-- 🆔 ID Upload Modal -->
-  <div id="idUploadModal" class="modal">
+  <div id="idUploadModal" class="modal" role="dialog" aria-modal="true" aria-label="Upload guest ID">
     <div class="modal-content modal-sm">
-      <span class="close" id="closeIdUploadBtn">&times;</span>
+      <button class="close" id="closeIdUploadBtn" aria-label="Close dialog">&times;</button>
       <h3>Please upload the guest's ID</h3>
       <input type="file" id="idUploadInput" accept="image/*" />
       <div class="modal-footer">
@@ -4010,9 +1358,9 @@
   </div>
 
   <!-- ✂️ ID Cropping Modal -->
-  <div id="idCropModal" class="modal">
+  <div id="idCropModal" class="modal" role="dialog" aria-modal="true" aria-label="Crop guest ID image">
     <div class="modal-content">
-      <span class="close" id="closeIdCropBtn">&times;</span>
+      <button class="close" id="closeIdCropBtn" aria-label="Close dialog">&times;</button>
       <h3>Adjust the crop for the ID</h3>
       <div class="image-preview-container">
         <img id="idCropImage" alt="ID to crop" />
@@ -4025,7 +1373,7 @@
   </div>
 
   <!-- 📋 Registration Form Preview Modal -->
-  <div id="registrationFormPreviewModal" class="modal">
+  <div id="registrationFormPreviewModal" class="modal" role="dialog" aria-modal="true" aria-label="Registration form preview">
     <div class="modal-content modal-print" id="formPreviewContent">
       <!-- Filled dynamically by JS -->
     </div>
@@ -4036,10 +1384,10 @@
   </div>
 
   <!-- 🏨 Check-In Confirmation Modal -->
-  <div id="checkInConfirmationModal" class="modal">
+  <div id="checkInConfirmationModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="checkInConfirmTitle">
     <div class="modal-content modal-sm">
-      <span class="close" id="closeCheckInConfirmationBtn">&times;</span>
-      <h3>🏨 Guest Check-In</h3>
+      <button class="close" id="closeCheckInConfirmationBtn" aria-label="Close dialog">&times;</button>
+      <h3 id="checkInConfirmTitle"><span class="material-icons" aria-hidden="true">hotel</span> Guest Check-In</h3>
       <div id="checkInSummaryContent"></div>
       <p style="margin-top: 16px; color: var(--text-secondary);">Is this guest checking in <strong>right now</strong>?</p>
       <div class="modal-footer">
@@ -4050,10 +1398,10 @@
   </div>
 
   <!-- 📱 SMS Confirmation Modal (Legacy - Hidden) -->
-  <div id="emailConfirmationModal" class="modal" style="display:none !important;">
+  <div id="emailConfirmationModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="emailConfirmTitle" style="display:none !important;">
     <div class="modal-content modal-sm">
-      <span class="close" id="closeEmailConfirmationBtn">&times;</span>
-      <h3>SMS Confirmation</h3>
+      <button class="close" id="closeEmailConfirmationBtn" aria-label="Close dialog">&times;</button>
+      <h3 id="emailConfirmTitle">SMS Confirmation</h3>
       <div id="emailSummaryContent"></div>
       <div class="modal-footer">
         <button id="sendEmailConfirmationBtn" class="btn btn-success">📱 Send SMS Confirmation</button>
@@ -4063,10 +1411,10 @@
   </div>
 
   <!-- 📑 Customer Reservations Modal -->
-  <div id="customerReservationsModal" class="modal">
+  <div id="customerReservationsModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="custReservationsTitle">
     <div class="modal-content">
-      <span class="close" id="closeCustomerReservationsBtn">&times;</span>
-      <h3>Customer Reservations</h3>
+      <button class="close" id="closeCustomerReservationsBtn" aria-label="Close dialog">&times;</button>
+      <h3 id="custReservationsTitle">Customer Reservations</h3>
       <div id="customerReservationsList"></div>
     </div>
   </div>

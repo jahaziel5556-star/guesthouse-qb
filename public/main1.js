@@ -267,6 +267,21 @@ const ModalManager = {
 // Expose globally
 window.ModalManager = ModalManager;
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// FORM SUBMIT PREVENTION - Prevent native form submission for modal forms
+// ═══════════════════════════════════════════════════════════════════════════════
+// The modal forms use novalidate + JS validation, so we prevent default submission.
+document.querySelectorAll('.modal form[novalidate]').forEach(form => {
+  form.addEventListener('submit', (e) => e.preventDefault());
+});
+
+// Clear input-error highlights when user starts typing
+document.addEventListener('input', (e) => {
+  if (e.target.classList.contains('input-error')) {
+    e.target.classList.remove('input-error');
+  }
+});
+
 /**
  * ButtonManager - Button state management with loading indicators
  * ─────────────────────────────────────────────────────────────────────────────────
@@ -3864,11 +3879,53 @@ document.getElementById("saveReservationBtn")?.addEventListener("click", async (
   const rate = parseFloat(document.getElementById("reservationRate").value);
   const note = document.getElementById("reservationNote").value || "";
 
-  if (isNaN(rate) || rate < 0) {
-    alert("Please enter a valid nightly rate.");
+  // ─────────────────────────────────────────────────────────────────────────
+  // ES6 FORM VALIDATION - Validate all fields before saving
+  // ─────────────────────────────────────────────────────────────────────────
+  const validationErrors = [];
+  const markFieldError = (fieldId, hasError) => {
+    const el = document.getElementById(fieldId);
+    if (el) el.classList.toggle('input-error', hasError);
+  };
+
+  // Validate each field and collect errors
+  const nameValid = validateName(name);
+  markFieldError('name', !nameValid);
+  if (!nameValid) validationErrors.push('Guest name is required (min 2 characters)');
+
+  const addressValid = validateAddress(address);
+  markFieldError('address', !addressValid);
+  if (!addressValid) validationErrors.push('Address is required (min 3 characters)');
+
+  const telValid = validateTelephone(telephone);
+  markFieldError('telephone', !telValid);
+  if (!telValid) validationErrors.push('Valid telephone number is required (min 7 digits)');
+
+  const datesValid = validateDates(arrivalDate, departureDate);
+  markFieldError('arrival', !datesValid);
+  markFieldError('departure', !datesValid);
+  if (!datesValid) validationErrors.push('Valid arrival and departure dates are required (departure must be after arrival)');
+
+  const roomValid = validateRoom(roomNumber);
+  markFieldError('room', !roomValid);
+  if (!roomValid) validationErrors.push('Please select a valid room number');
+
+  const rateValid = !isNaN(rate) && rate >= 0;
+  markFieldError('reservationRate', !rateValid);
+  if (!rateValid) validationErrors.push('Please enter a valid nightly rate');
+
+  if (validationErrors.length > 0) {
+    // Show first error as alert, highlight all invalid fields
+    alert(validationErrors[0]);
+    // Focus first invalid field
+    const firstInvalid = document.querySelector('#addReservationForm .input-error');
+    if (firstInvalid) firstInvalid.focus();
     resetSaveButton();
     return;
   }
+
+  // Clear any previous error highlights on successful validation
+  document.querySelectorAll('#addReservationForm .input-error').forEach(el => el.classList.remove('input-error'));
 
 // ===========================================================================
 // CHECK FOR OVERLAPPING RESERVATIONS
@@ -4729,10 +4786,13 @@ function showEditDeletePopup(reservation) {
   overlay.setAttribute('data-popup-type', 'edit-reservation');
   overlay.className = 'modal reservation-popup-modal';
   overlay.style.display = 'block';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  overlay.setAttribute('aria-label', 'Edit reservation');
 
   overlay.innerHTML = `
     <div class="modal-content modal-scrollable reservation-popup">
-      <span class="close" id="closeReservationPopup">&times;</span>
+      <button class="close" aria-label="Close dialog" id="closeReservationPopup">&times;</button>
       
       <div class="reservation-popup-header">
         <span class="material-icons">hotel</span>
@@ -5403,10 +5463,13 @@ async function openLateFeeModal(reservation) {
   lateFeeOverlay.className = 'modal reservation-popup-modal';
   lateFeeOverlay.style.display = 'block';
   lateFeeOverlay.style.zIndex = '3002';
+  lateFeeOverlay.setAttribute('role', 'dialog');
+  lateFeeOverlay.setAttribute('aria-modal', 'true');
+  lateFeeOverlay.setAttribute('aria-label', 'Late fee charge');
   
   lateFeeOverlay.innerHTML = `
     <div class="modal-content modal-scrollable" style="max-width: 500px;">
-      <span class="close" id="closeLateFeeModal">&times;</span>
+      <button class="close" aria-label="Close dialog" id="closeLateFeeModal">&times;</button>
       
       <div style="text-align:center; padding:20px; background:linear-gradient(135deg, #dc2626, #b91c1c); color:#fff; border-radius:12px; margin-bottom:20px;">
         <span class="material-icons" style="font-size:48px; margin-bottom:8px;">schedule</span>
@@ -5753,6 +5816,9 @@ function showReservationHistory(reservation) {
   historyOverlay.className = 'modal reservation-popup-modal';
   historyOverlay.style.display = 'block';
   historyOverlay.style.zIndex = '3001';
+  historyOverlay.setAttribute('role', 'dialog');
+  historyOverlay.setAttribute('aria-modal', 'true');
+  historyOverlay.setAttribute('aria-label', 'Reservation history');
   
   // Build history timeline HTML
   let timelineHTML = '';
@@ -5876,7 +5942,7 @@ function showReservationHistory(reservation) {
   
   historyOverlay.innerHTML = `
     <div class="modal-content modal-scrollable reservation-popup" style="max-width:700px;">
-      <span class="close" id="closeHistoryPopup">&times;</span>
+      <button class="close" aria-label="Close dialog" id="closeHistoryPopup">&times;</button>
       
       <div class="reservation-popup-header">
         <span class="material-icons">history</span>
@@ -9267,7 +9333,7 @@ document.getElementById("printReceiptsBtn")?.addEventListener("click", () => {
   if (modalContent) {
     // Use proper CSS classes matching the theme
     modalContent.innerHTML = `
-      <span class="close" id="closePrintReceiptsModalBtn">&times;</span>
+      <button class="close" aria-label="Close dialog" id="closePrintReceiptsModalBtn">&times;</button>
       <h2 class="modal-header-centered">🧾 Print Receipts</h2>
       
       <div class="radio-group" id="filterGroup">
@@ -12027,10 +12093,13 @@ document.getElementById('manageEmployeesBtn')?.addEventListener('click', async (
     modal = document.createElement('div');
     modal.id = 'manageEmployeesModal';
     modal.className = 'modal';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    modal.setAttribute('aria-label', 'Manage employees');
     modal.innerHTML = `
       <div class="modal-content modal-lg modal-scrollable">
-        <span class="close" onclick="this.closest('.modal').style.display='none'">&times;</span>
-        <h2 class="modal-header-centered">👥 Manage Employees</h2>
+        <button class="close" aria-label="Close dialog" onclick="this.closest('.modal').style.display='none'">&times;</button>
+        <h2 class="modal-header-centered"><span class="material-icons" aria-hidden="true">group</span> Manage Employees</h2>
         
         <div id="employeesList" class="results-container">
           <p class="text-center text-muted">Loading employees...</p>
