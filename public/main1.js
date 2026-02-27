@@ -4594,6 +4594,11 @@ document.getElementById("showAvailabilityBtn")?.addEventListener("click", () => 
 });
 document.getElementById("closeAvailabilityBtn")?.addEventListener("click", () => {
   ModalManager.close('availabilityModal');
+  // Reset to date entry screen for next open
+  const s1 = document.getElementById("availGridScreen1");
+  const s2 = document.getElementById("availGridScreen2");
+  if (s1) s1.style.display = "flex";
+  if (s2) s2.style.display = "none";
 });
 
 // Helper to clear and reset the Add Reservation form
@@ -4660,8 +4665,14 @@ async function renderAvailabilityGrid() {
   grid.innerHTML = "";
 
   const table = document.createElement("table");
+  table.className = "availability-grid-table avail-grid-compact";
   const header = document.createElement("tr");
-  header.innerHTML = `<th>Room \\ Date</th>` + dates.map(d => `<th>${d}</th>`).join("");
+  header.innerHTML = `<th>Room</th>` + dates.map(d => {
+    const dt = new Date(d + 'T00:00:00');
+    const day = dt.getDate();
+    const mon = dt.toLocaleString('default', { month: 'short' });
+    return `<th>${day} ${mon}</th>`;
+  }).join("");
   table.appendChild(header);
 
   for (const room of rooms) {
@@ -4681,21 +4692,19 @@ async function renderAvailabilityGrid() {
         const name = customer ? customer.name : "Unknown";
         const button = document.createElement("button");
         button.textContent = name;
+        button.className = "guest-btn";
         if (res.paymentStatus === "unpaid") {
-          button.style.background = "red";
+          button.classList.add("unpaid");
         } else if (res.paymentStatus === "partially_paid") {
-          button.style.background = "blue";
+          button.classList.add("partial");
         } else {
-          button.style.background = "green"; // fully paid
+          button.classList.add("paid");
         }
-        button.style.border = "none";
-        button.style.padding = "2px 5px";
-        button.style.cursor = "pointer";
-        button.title = `Reservation`;
+        button.title = `${name} — ${res.arrivalDate} to ${res.departureDate}`;
         button.addEventListener("click", () => showEditDeletePopup(res));
         cell.appendChild(button);
       } else {
-        cell.style.backgroundColor = "#ccffcc";
+        cell.classList.add("cell-available");
       }
 
       row.appendChild(cell);
@@ -4791,165 +4800,86 @@ function showEditDeletePopup(reservation) {
   overlay.setAttribute('aria-label', 'Edit reservation');
 
   overlay.innerHTML = `
-    <div class="modal-content modal-scrollable reservation-popup">
+    <div class="modal-content modal-compact" style="max-width:680px;">
       <button class="close" aria-label="Close dialog" id="closeReservationPopup">&times;</button>
-      
-      <div class="reservation-popup-header">
-        <span class="material-icons">hotel</span>
-        <h2>Reservation Details</h2>
-      </div>
+      <h2><span class="material-icons" aria-hidden="true">hotel</span> Room ${reservation.roomNumber} — ${customer?.name || 'Unknown'}</h2>
 
-      <div class="reservation-info-card">
-        <div class="info-grid">
-          <div class="info-item">
-            <span class="material-icons">person</span>
-            <div>
-              <label>Guest Name</label>
-              <strong>${customer?.name || 'Unknown'}</strong>
-            </div>
-          </div>
-          <div class="info-item">
-            <span class="material-icons">phone</span>
-            <div>
+      <div class="compact-form">
+        <!-- Guest Info (read-only) -->
+        <fieldset>
+          <legend><span class="material-icons" aria-hidden="true">person</span> Guest Information</legend>
+          <div class="form-grid">
+            <div class="compact-group">
               <label>Phone</label>
-              <strong>${customer?.telephone || 'N/A'}</strong>
+              <div class="info-readonly">${customer?.telephone || 'N/A'}</div>
             </div>
-          </div>
-          <div class="info-item">
-            <span class="material-icons">location_on</span>
-            <div>
+            <div class="compact-group">
               <label>Address</label>
-              <strong>${customer?.address || 'N/A'}</strong>
+              <div class="info-readonly">${customer?.address || 'N/A'}</div>
             </div>
           </div>
-          <div class="info-item">
-            <span class="material-icons">door_front</span>
-            <div>
-              <label>Room</label>
-              <strong>${reservation.roomNumber}</strong>
-            </div>
+        </fieldset>
+
+        <!-- Check-in / Check-out Status -->
+        <div class="status-strip">
+          <div class="status-pill ${checkedIn ? 'pill-success' : 'pill-pending'}">
+            <span class="material-icons" style="font-size:16px;">${checkedIn ? 'check_circle' : 'schedule'}</span>
+            In: ${checkedIn ? checkedInTime : 'Pending'}
           </div>
-          <div class="info-item">
-            <span class="material-icons">payments</span>
-            <div>
-              <label>Rate/Night</label>
-              <strong>$${parseFloat(reservation.rate || 0).toFixed(2)}</strong>
-            </div>
+          <div class="status-pill ${checkedOut ? 'pill-success' : (checkedIn ? 'pill-pending' : 'pill-disabled')}">
+            <span class="material-icons" style="font-size:16px;">${checkedOut ? 'check_circle' : 'schedule'}</span>
+            Out: ${checkedOut ? checkedOutTime : 'Pending'}
           </div>
-        </div>
-        
-        <div class="dates-row">
-          <div class="date-block">
-            <span class="material-icons">login</span>
-            <div>
-              <label>Check-in</label>
-              <strong>${formatDateDMY(reservation.arrivalDate)}</strong>
-              <small>3:00 PM</small>
-            </div>
-          </div>
-          <div class="nights-badge">
-            <span>${nights}</span>
-            <small>night${nights !== 1 ? 's' : ''}</small>
-          </div>
-          <div class="date-block">
-            <span class="material-icons">logout</span>
-            <div>
-              <label>Check-out</label>
-              <strong>${formatDateDMY(reservation.departureDate)}</strong>
-              <small>1:00 PM</small>
-            </div>
+          <div class="status-strip-actions">
+            <button id="checkInBtn" class="btn btn-sm ${checkedIn ? 'btn-disabled' : 'btn-success'}" ${checkedIn ? 'disabled' : ''}>
+              ${checkedIn ? '✓ In' : 'Check In'}
+            </button>
+            ${checkedIn && !checkedOut ? `<button id="undoCheckInBtn" class="btn btn-ghost btn-sm">↩</button>` : ''}
+            <button id="checkOutBtn" class="btn btn-sm ${checkedOut ? 'btn-disabled' : 'btn-warning'}" ${checkedOut || !checkedIn ? 'disabled' : ''}>
+              ${checkedOut ? '✓ Out' : 'Check Out'}
+            </button>
+            ${checkedOut ? `<button id="undoCheckOutBtn" class="btn btn-ghost btn-sm">↩</button>` : ''}
           </div>
         </div>
 
-        ${reservation.note ? `
-        <div class="note-section">
-          <span class="material-icons">notes</span>
-          <span>${reservation.note}</span>
-        </div>
-        ` : ''}
-      </div>
+        <!-- Edit Stay Details -->
+        <fieldset>
+          <legend><span class="material-icons" aria-hidden="true">edit</span> Stay Details</legend>
+          <div class="form-grid">
+            <div class="compact-group">
+              <label for="editRoom">Room</label>
+              <input type="text" id="editRoom" value="${reservation.roomNumber}" />
+            </div>
+            <div class="compact-group">
+              <label for="editRate">Rate/Night ($)</label>
+              <input type="number" id="editRate" value="${reservation.rate || ''}" min="0" step="0.01" placeholder="e.g. 85.00" />
+            </div>
+            <div class="compact-group">
+              <label for="editArrivalDate">Check-in Date</label>
+              <input type="date" id="editArrivalDate" value="${reservation.arrivalDate}" />
+            </div>
+            <div class="compact-group">
+              <label for="editDepartureDate">Check-out Date</label>
+              <input type="date" id="editDepartureDate" value="${reservation.departureDate}" />
+            </div>
+            <div class="compact-group full-width">
+              <label for="editNote">Note</label>
+              <textarea id="editNote" rows="2">${escapeHTML(reservation.note || '')}</textarea>
+            </div>
+          </div>
+        </fieldset>
 
-      <div class="status-cards">
-        <div class="status-card ${checkedIn ? 'status-success' : 'status-pending'}">
-          <span class="material-icons">${checkedIn ? 'check_circle' : 'schedule'}</span>
-          <div>
-            <strong>Check-In</strong>
-            <span>${checkedIn ? checkedInTime : 'Pending'}</span>
-          </div>
+        <!-- Action Buttons -->
+        <div class="modal-footer compact-footer">
+          <button id="viewHistoryBtn" class="btn btn-secondary btn-sm"><span class="material-icons">history</span> History</button>
+          <button id="printRegistrationFromEditBtn" class="btn btn-secondary btn-sm"><span class="material-icons">print</span> Print</button>
+          <button id="extendReservationBtn" class="btn btn-secondary btn-sm"><span class="material-icons">update</span> Extend</button>
+          <button id="lateFeeBtn" class="btn btn-danger btn-sm" style="background:linear-gradient(135deg,#dc2626,#b91c1c);"><span class="material-icons">schedule</span> Late Fee</button>
+          <button id="managePaymentBtn" class="btn btn-warning btn-sm"><span class="material-icons">payments</span> Payment</button>
+          <button id="deleteBtn" class="btn btn-danger btn-sm"><span class="material-icons">delete</span> Delete</button>
+          <button id="saveEditBtn" class="btn btn-primary btn-sm"><span class="material-icons">save</span> Save</button>
+          <button id="cancelPopup" class="btn btn-ghost btn-sm">Cancel</button>
         </div>
-        <div class="status-card ${checkedOut ? 'status-success' : (checkedIn ? 'status-pending' : 'status-disabled')}">
-          <span class="material-icons">${checkedOut ? 'check_circle' : 'schedule'}</span>
-          <div>
-            <strong>Check-Out</strong>
-            <span>${checkedOut ? checkedOutTime : 'Pending'}</span>
-          </div>
-        </div>
-      </div>
-
-      <div class="action-buttons-row">
-        <button id="checkInBtn" class="btn ${checkedIn ? 'btn-disabled' : 'btn-success'}" ${checkedIn ? 'disabled' : ''}>
-          <span class="material-icons">${checkedIn ? 'check' : 'login'}</span>
-          ${checkedIn ? 'Checked In' : 'Check In'}
-        </button>
-        ${checkedIn && !checkedOut ? `<button id="undoCheckInBtn" class="btn btn-ghost btn-sm">↩ Undo</button>` : ''}
-        <button id="checkOutBtn" class="btn ${checkedOut ? 'btn-disabled' : 'btn-warning'}" ${checkedOut || !checkedIn ? 'disabled' : ''}>
-          <span class="material-icons">${checkedOut ? 'check' : 'logout'}</span>
-          ${checkedOut ? 'Checked Out' : 'Check Out'}
-        </button>
-        ${checkedOut ? `<button id="undoCheckOutBtn" class="btn btn-ghost btn-sm">↩ Undo</button>` : ''}
-      </div>
-
-      <div class="edit-section">
-        <h3><span class="material-icons">edit</span> Edit Reservation</h3>
-        <div class="form-row">
-          <div class="form-group">
-            <label>Room Number</label>
-            <input type="text" id="editRoom" value="${reservation.roomNumber}" />
-          </div>
-          <div class="form-group">
-            <label>Nightly Rate ($)</label>
-            <input type="number" id="editRate" value="${reservation.rate || ''}" min="0" step="0.01" placeholder="e.g. 85.00" />
-          </div>
-        </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label>Check-in Date</label>
-            <input type="date" id="editArrivalDate" value="${reservation.arrivalDate}" />
-          </div>
-          <div class="form-group">
-            <label>Check-out Date</label>
-            <input type="date" id="editDepartureDate" value="${reservation.departureDate}" />
-          </div>
-        </div>
-        <div class="form-group">
-          <label>Note</label>
-          <textarea id="editNote" rows="2">${escapeHTML(reservation.note || '')}</textarea>
-        </div>
-      </div>
-
-      <div class="modal-footer">
-        <button id="viewHistoryBtn" class="btn btn-secondary">
-          <span class="material-icons">history</span> History
-        </button>
-        <button id="printRegistrationFromEditBtn" class="btn btn-secondary">
-          <span class="material-icons">print</span> Print Form
-        </button>
-        <button id="extendReservationBtn" class="btn btn-secondary">
-          <span class="material-icons">update</span> Extend
-        </button>
-        <button id="lateFeeBtn" class="btn btn-danger" style="background: linear-gradient(135deg, #dc2626, #b91c1c);">
-          <span class="material-icons">schedule</span> Late Fee
-        </button>
-        <button id="managePaymentBtn" class="btn btn-warning">
-          <span class="material-icons">payments</span> Payment
-        </button>
-        <button id="deleteBtn" class="btn btn-danger">
-          <span class="material-icons">delete</span> Delete
-        </button>
-        <button id="saveEditBtn" class="btn btn-primary">
-          <span class="material-icons">save</span> Save
-        </button>
-        <button id="cancelPopup" class="btn btn-ghost">Cancel</button>
       </div>
     </div>
   `;
@@ -9322,8 +9252,21 @@ async function loadRoomHistory(roomNumber) {
   };
 }
 
-document.getElementById("loadGridBtn")?.addEventListener("click", () => {
-  renderAvailabilityGrid();
+document.getElementById("loadGridBtn")?.addEventListener("click", async () => {
+  await renderAvailabilityGrid();
+  // Switch to grid screen if grid was rendered successfully
+  const grid = document.getElementById("availabilityGrid");
+  if (grid && grid.innerHTML.trim()) {
+    document.getElementById("availGridScreen1").style.display = "none";
+    document.getElementById("availGridScreen2").style.display = "flex";
+  }
+});
+
+// New Date button - switch back to date entry screen
+document.getElementById("newDateBtn")?.addEventListener("click", () => {
+  document.getElementById("availGridScreen2").style.display = "none";
+  document.getElementById("availGridScreen1").style.display = "flex";
+  document.getElementById("availabilityGrid").innerHTML = "";
 });
 
 document.getElementById("printReceiptsBtn")?.addEventListener("click", () => {

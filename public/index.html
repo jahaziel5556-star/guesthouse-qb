@@ -563,29 +563,48 @@
 
   <!-- 📊 Availability Grid Modal -->
   <div id="availabilityModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="availabilityTitle">
-    <div class="modal-content modal-lg">
+    <div class="modal-content avail-grid-modal">
       <button class="close" id="closeAvailabilityBtn" aria-label="Close dialog">&times;</button>
-      <h2 id="availabilityTitle"><span class="material-icons" aria-hidden="true">calendar_month</span> Availability Grid</h2>
-      <div class="filter-panel">
-        <div class="filter-group">
-          <label for="startDate">Start Date:</label>
-          <input type="date" id="startDate" />
+
+      <!-- Screen 1: Date Range Entry -->
+      <div id="availGridScreen1" class="avail-screen">
+        <div class="avail-date-entry">
+          <span class="material-icons avail-hero-icon" aria-hidden="true">calendar_month</span>
+          <h2 id="availabilityTitle">Availability Grid</h2>
+          <p class="avail-subtitle">Select a date range to view room availability</p>
+          <div class="avail-date-fields">
+            <div class="filter-group">
+              <label for="startDate">Start Date</label>
+              <input type="date" id="startDate" />
+            </div>
+            <div class="filter-group">
+              <label for="endDate">End Date</label>
+              <input type="date" id="endDate" />
+            </div>
+          </div>
+          <button id="loadGridBtn" class="btn btn-primary" style="margin-top:12px;">
+            <span class="material-icons" aria-hidden="true">grid_on</span> Generate Grid
+          </button>
         </div>
-        <div class="filter-group">
-          <label for="endDate">End Date:</label>
-          <input type="date" id="endDate" />
+      </div>
+
+      <!-- Screen 2: Grid Results -->
+      <div id="availGridScreen2" class="avail-screen" style="display:none;">
+        <div class="avail-grid-toolbar">
+          <button id="newDateBtn" class="btn btn-secondary btn-sm">
+            <span class="material-icons">arrow_back</span> New Date
+          </button>
+          <div class="color-legend" style="margin:0;">
+            <div class="legend-item"><span class="legend-color paid-full"></span>Paid</div>
+            <div class="legend-item"><span class="legend-color paid-deposit"></span>Partial</div>
+            <div class="legend-item"><span class="legend-color unpaid"></span>Unpaid</div>
+          </div>
+          <div class="avail-grid-toolbar-actions">
+            <button id="downloadCsvBtn" class="btn btn-secondary btn-sm">⬇ CSV</button>
+            <button id="printGridBtn" class="btn btn-secondary btn-sm">🖨️ Print</button>
+          </div>
         </div>
-        <button id="loadGridBtn" class="btn btn-primary">Generate Grid</button>
-      </div>
-      <div class="color-legend">
-        <div class="legend-item"><span class="legend-color paid-full"></span>Fully Paid</div>
-        <div class="legend-item"><span class="legend-color paid-deposit"></span>Partially Paid</div>
-        <div class="legend-item"><span class="legend-color unpaid"></span>Unpaid</div>
-      </div>
-      <div id="availabilityGrid" class="results-container"></div>
-      <div class="modal-footer">
-        <button id="downloadCsvBtn" class="btn btn-secondary">⬇ Download CSV</button>
-        <button id="printGridBtn" class="btn btn-secondary">🖨️ Print</button>
+        <div id="availabilityGrid" class="avail-grid-scroll"></div>
       </div>
     </div>
   </div>
