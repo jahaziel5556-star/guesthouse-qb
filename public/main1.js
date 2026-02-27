@@ -59,12 +59,6 @@ import {
   onSnapshot,
   getDoc
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-import {
-  getStorage,
-  ref as storageRef,
-  uploadBytes,
-  getDownloadURL
-} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
 
 /* ╔═══════════════════════════════════════════════════════════════════════════════╗
    ║                    SECTION 1: APP CONFIGURATION                               ║
@@ -587,7 +581,6 @@ async function initializeApp() {
   const app = initializeFirebaseApp(FIREBASE_CONFIG);
   const db = getFirestore(app);  // Database connection
   const auth = getAuth(app);     // Authentication service
-  const storage = getStorage(app); // Cloud Storage for ID images
 
   // Enable offline mode - app works even without internet
   try {
@@ -1370,54 +1363,21 @@ function safeOnSnapshot(ref, onNext) {
 
 
 /**
- * Upload a cropped ID image to Firebase Storage and return the download URL.
- * Converts data URL → Blob → uploads as WebP to keep size minimal.
- * Path: customer-ids/<customerId>.webp
+ * Save a cropped ID image directly to the customer's Firestore document as a data URL.
+ * No Firebase Storage involved — the base64 JPEG is stored in the idImageUrl field.
+ * Cropped images are small (~10-30KB) so this is efficient and avoids CSP/Storage issues.
  * @param {string} customerId - Firestore customer doc ID
  * @param {string} dataUrl - base64 data URL from canvas.toDataURL
- * @returns {Promise<string>} public download URL
+ * @returns {Promise<string>} the same data URL (now saved)
  */
-async function uploadIdImageToStorage(customerId, dataUrl) {
-  console.log("📤 uploadIdImageToStorage called for customer:", customerId, "dataUrl length:", dataUrl?.length);
-  
-  // Convert data URL to blob without fetch (avoids CSP connect-src blocking data: URLs)
-  const [header, base64] = dataUrl.split(',');
-  const mime = header.match(/:(.*?);/)[1];
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  const blob = new Blob([bytes], { type: mime });
-  console.log("📤 Blob created:", blob.size, "bytes, type:", blob.type);
-
-  // Try to convert to WebP for smaller size, fall back to original
-  let uploadBlob = blob;
-  let fileName = `${customerId}.jpg`;
-  try {
-    const bitmap = await createImageBitmap(blob);
-    const canvas = document.createElement('canvas');
-    canvas.width = bitmap.width;
-    canvas.height = bitmap.height;
-    canvas.getContext('2d').drawImage(bitmap, 0, 0);
-    uploadBlob = await new Promise((resolve, reject) => {
-      canvas.toBlob((b) => {
-        if (b) resolve(b);
-        else reject(new Error("WebP conversion returned null blob"));
-      }, 'image/webp', 0.8);
-    });
-    fileName = `${customerId}.webp`;
-    console.log("📤 WebP converted:", uploadBlob.size, "bytes");
-  } catch (e) {
-    console.warn("WebP conversion failed, uploading as JPEG:", e);
-    uploadBlob = blob;
-  }
-
-  console.log("📤 Uploading to Firebase Storage:", `customer-ids/${fileName}`);
-  const fileRef = storageRef(storage, `customer-ids/${fileName}`);
-  await uploadBytes(fileRef, uploadBlob, { contentType: uploadBlob.type });
-  console.log("📤 Upload complete, getting download URL...");
-  const downloadURL = await getDownloadURL(fileRef);
-  console.log("✅ ID image uploaded to Storage:", downloadURL);
-  return downloadURL;
+async function saveCustomerIdImage(customerId, dataUrl) {
+  console.log("📤 saveCustomerIdImage called for customer:", customerId, "dataUrl length:", dataUrl?.length);
+  await updateDoc(doc(db, "customers", customerId), { idImageUrl: dataUrl });
+  // Update local cache
+  const idx = customers.findIndex(c => c.id === customerId);
+  if (idx !== -1) customers[idx].idImageUrl = dataUrl;
+  console.log("✅ ID image saved to Firestore for customer:", customerId);
+  return dataUrl;
 }
 
 let uploadedIdFile = null;
@@ -4463,44 +4423,38 @@ document.getElementById("idUploadInput")?.addEventListener("change", function (e
 
   ModalManager.close('idCropModal');
 
-  // Check if we're in edit customer ID mode — upload immediately
+  // Check if we're in edit customer ID mode — save directly to Firestore
   if (window._editCustomerIdCropMode) {
     window._editCustomerIdCropMode = false;
     const custId = editingCustomerId;
     const idPreview = document.getElementById("editCustomerIdPreview");
     
     if (!custId) {
-      console.error("No editingCustomerId set for edit customer ID upload");
+      console.error("No editingCustomerId set for edit customer ID save");
       return;
     }
     
-    // Show uploading state
+    // Show saving state
     if (idPreview) {
       idPreview.innerHTML = `<img src="${croppedDataUrl}" alt="New ID" style="opacity:0.5;" />
-        <div style="color: var(--accent-warning); font-size: 0.85em; margin-top: 4px; text-align:center;">⏳ Uploading ID...</div>`;
+        <div style="color: var(--accent-warning); font-size: 0.85em; margin-top: 4px; text-align:center;">⏳ Saving ID...</div>`;
     }
     
     try {
-      const idUrl = await uploadIdImageToStorage(custId, croppedDataUrl);
-      await updateDoc(doc(db, "customers", custId), { idImageUrl: idUrl });
-      
-      // Update local cache
-      const idx = customers.findIndex(c => c.id === custId);
-      if (idx !== -1) customers[idx].idImageUrl = idUrl;
+      await saveCustomerIdImage(custId, croppedDataUrl);
       
       // Show success in preview
       if (idPreview) {
-        idPreview.innerHTML = `<img src="${idUrl}" alt="Customer ID" />
+        idPreview.innerHTML = `<img src="${croppedDataUrl}" alt="Customer ID" />
           <div style="color: #10b981; font-size: 0.85em; margin-top: 4px; text-align:center;">✓ ID saved successfully</div>`;
       }
-      console.log("✅ Edit customer ID uploaded and saved:", idUrl);
     } catch (err) {
-      console.error("❌ Failed to upload edit customer ID:", err);
+      console.error("❌ Failed to save edit customer ID:", err);
       if (idPreview) {
         idPreview.innerHTML = `<img src="${croppedDataUrl}" alt="New ID" />
-          <div style="color: var(--accent-danger); font-size: 0.85em; margin-top: 4px; text-align:center;">❌ Upload failed — try again</div>`;
+          <div style="color: var(--accent-danger); font-size: 0.85em; margin-top: 4px; text-align:center;">❌ Save failed — try again</div>`;
       }
-      alert("Failed to upload ID image. Please try again.");
+      alert("Failed to save ID image. Please try again.");
     }
     return; // Don't continue with reservation form logic
   }
@@ -4510,14 +4464,11 @@ document.getElementById("idUploadInput")?.addEventListener("change", function (e
     const printCustomerId = window._printFormCustomerId;
     window._printFormCustomerId = null;
     try {
-      const idUrl = await uploadIdImageToStorage(printCustomerId, croppedDataUrl);
-      await updateDoc(doc(db, "customers", printCustomerId), { idImageUrl: idUrl });
-      const idx = customers.findIndex(c => c.id === printCustomerId);
-      if (idx !== -1) customers[idx].idImageUrl = idUrl;
-      console.log("✅ ID uploaded from Print Form flow.");
-      await window._printFormAfterIdUpload(idUrl);
+      await saveCustomerIdImage(printCustomerId, croppedDataUrl);
+      console.log("✅ ID saved from Print Form flow.");
+      await window._printFormAfterIdUpload(croppedDataUrl);
     } catch (err) {
-      console.error("❌ Failed to upload ID from Print Form:", err);
+      console.error("❌ Failed to save ID from Print Form:", err);
       window._printFormAfterIdUpload = null;
       await showFormPreview(null, {}, croppedDataUrl);
     }
@@ -4531,20 +4482,13 @@ document.getElementById("idUploadInput")?.addEventListener("change", function (e
   const reservation = resDoc.exists() ? { id: resDoc.id, ...resDoc.data() } : null;
   const customer = customers.find(c => c.id === latestCustomerId);
 
-    // 🔹 Upload ID to Firebase Storage and save URL to Firestore
+    // 🔹 Save ID image directly to Firestore customer document
   if (latestCustomerId && latestCroppedImageDataUrl) {
     try {
-      const idUrl = await uploadIdImageToStorage(latestCustomerId, latestCroppedImageDataUrl);
-      await updateDoc(doc(db, "customers", latestCustomerId), {
-        idImageUrl: idUrl
-      });
-      // update local cache too
-      const idx = customers.findIndex(c => c.id === latestCustomerId);
-      if (idx !== -1) customers[idx].idImageUrl = idUrl;
-      latestCroppedImageDataUrl = idUrl; // use URL going forward
-      console.log("✅ ID uploaded to Storage and saved to customer record.");
+      await saveCustomerIdImage(latestCustomerId, latestCroppedImageDataUrl);
+      console.log("✅ ID saved to customer record.");
     } catch (err) {
-      console.error("❌ Failed to upload/save ID:", err);
+      console.error("❌ Failed to save ID:", err);
     }
   }
 
