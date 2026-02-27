@@ -1378,6 +1378,8 @@ function safeOnSnapshot(ref, onNext) {
  * @returns {Promise<string>} public download URL
  */
 async function uploadIdImageToStorage(customerId, dataUrl) {
+  console.log("📤 uploadIdImageToStorage called for customer:", customerId, "dataUrl length:", dataUrl?.length);
+  
   // Convert data URL to blob without fetch (avoids CSP connect-src blocking data: URLs)
   const [header, base64] = dataUrl.split(',');
   const mime = header.match(/:(.*?);/)[1];
@@ -1385,6 +1387,7 @@ async function uploadIdImageToStorage(customerId, dataUrl) {
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   const blob = new Blob([bytes], { type: mime });
+  console.log("📤 Blob created:", blob.size, "bytes, type:", blob.type);
 
   // Try to convert to WebP for smaller size, fall back to original
   let uploadBlob = blob;
@@ -1395,14 +1398,23 @@ async function uploadIdImageToStorage(customerId, dataUrl) {
     canvas.width = bitmap.width;
     canvas.height = bitmap.height;
     canvas.getContext('2d').drawImage(bitmap, 0, 0);
-    uploadBlob = await new Promise(resolve => canvas.toBlob(resolve, 'image/webp', 0.8));
+    uploadBlob = await new Promise((resolve, reject) => {
+      canvas.toBlob((b) => {
+        if (b) resolve(b);
+        else reject(new Error("WebP conversion returned null blob"));
+      }, 'image/webp', 0.8);
+    });
     fileName = `${customerId}.webp`;
+    console.log("📤 WebP converted:", uploadBlob.size, "bytes");
   } catch (e) {
     console.warn("WebP conversion failed, uploading as JPEG:", e);
+    uploadBlob = blob;
   }
 
+  console.log("📤 Uploading to Firebase Storage:", `customer-ids/${fileName}`);
   const fileRef = storageRef(storage, `customer-ids/${fileName}`);
   await uploadBytes(fileRef, uploadBlob, { contentType: uploadBlob.type });
+  console.log("📤 Upload complete, getting download URL...");
   const downloadURL = await getDownloadURL(fileRef);
   console.log("✅ ID image uploaded to Storage:", downloadURL);
   return downloadURL;
