@@ -59,12 +59,6 @@ import {
   onSnapshot,
   getDoc
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-import {
-  getStorage,
-  ref as storageRef,
-  uploadBytes,
-  getDownloadURL
-} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
 
 /* ╔═══════════════════════════════════════════════════════════════════════════════╗
    ║                    SECTION 1: APP CONFIGURATION                               ║
@@ -587,7 +581,6 @@ async function initializeApp() {
   const app = initializeFirebaseApp(FIREBASE_CONFIG);
   const db = getFirestore(app);  // Database connection
   const auth = getAuth(app);     // Authentication service
-  const storage = getStorage(app); // Cloud Storage for ID images
 
   // Enable offline mode - app works even without internet
   try {
@@ -1368,55 +1361,6 @@ function safeOnSnapshot(ref, onNext) {
 }
 
 
-
-/**
- * Upload a cropped ID image to Firebase Cloud Storage and save the download URL
- * to the customer's Firestore document. Accessible from any device.
- *
- * Uses atob + Uint8Array to convert the data URL to a Blob (avoids CSP fetch restriction).
- * Falls back to storing data URL directly in Firestore if Storage upload fails.
- *
- * @param {string} customerId - Firestore customer doc ID
- * @param {string} dataUrl - base64 data URL from canvas.toDataURL
- * @returns {Promise<string>} Firebase Storage download URL or data URL fallback
- */
-async function saveCustomerIdImage(customerId, dataUrl) {
-  console.log("📤 saveCustomerIdImage called for:", customerId);
-
-  let savedUrl = dataUrl; // Default: store as data URL
-
-  try {
-    // 1. Convert data URL to Blob (no fetch needed — avoids CSP issues)
-    const parts = dataUrl.split(',');
-    const mime = parts[0].match(/:(.*?);/)[1];
-    const raw = atob(parts[1]);
-    const arr = new Uint8Array(raw.length);
-    for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
-    const blob = new Blob([arr], { type: mime });
-    console.log("📤 Blob ready:", blob.size, "bytes");
-
-    // 2. Upload to Firebase Storage
-    const fileName = `${customerId}.jpg`;
-    const fileRef = storageRef(storage, `customer-ids/${fileName}`);
-    console.log("📤 Uploading to Firebase Storage:", `customer-ids/${fileName}`);
-    await uploadBytes(fileRef, blob, { contentType: mime });
-
-    // 3. Get the public download URL
-    savedUrl = await getDownloadURL(fileRef);
-    console.log("✅ Firebase Storage upload success! URL:", savedUrl);
-  } catch (storageErr) {
-    console.warn("⚠️ Firebase Storage upload failed, saving data URL directly to Firestore:", storageErr.message);
-    savedUrl = dataUrl; // Fallback: store the base64 data URL directly
-  }
-
-  // 4. Save URL (or data URL fallback) to customer Firestore doc + local cache
-  await updateDoc(doc(db, "customers", customerId), { idImageUrl: savedUrl });
-  const idx = customers.findIndex(c => c.id === customerId);
-  if (idx !== -1) customers[idx].idImageUrl = savedUrl;
-  console.log("✅ ID saved to customer record");
-
-  return savedUrl;
-}
 
 let uploadedIdFile = null;
 let cropperInstance = null;
@@ -4461,56 +4405,20 @@ document.getElementById("idUploadInput")?.addEventListener("change", function (e
 
   ModalManager.close('idCropModal');
 
-  // Check if we're in edit customer ID mode — save directly to Firestore
+  // Check if we're in edit customer ID mode
   if (window._editCustomerIdCropMode) {
     window._editCustomerIdCropMode = false;
-    const custId = editingCustomerId;
+    
+    // Store cropped image for edit customer modal
+    editCustomerNewIdImage = croppedDataUrl;
+    
+    // Update preview in edit customer modal
     const idPreview = document.getElementById("editCustomerIdPreview");
-    
-    if (!custId) {
-      console.error("No editingCustomerId set for edit customer ID save");
-      return;
-    }
-    
-    // Show saving state
     if (idPreview) {
-      idPreview.innerHTML = `<img src="${croppedDataUrl}" alt="New ID" style="opacity:0.5;" />
-        <div style="color: var(--accent-warning); font-size: 0.85em; margin-top: 4px; text-align:center;">⏳ Saving ID...</div>`;
-    }
-    
-    try {
-      await saveCustomerIdImage(custId, croppedDataUrl);
-      
-      // Show success in preview
-      if (idPreview) {
-        idPreview.innerHTML = `<img src="${croppedDataUrl}" alt="Customer ID" />
-          <div style="color: #10b981; font-size: 0.85em; margin-top: 4px; text-align:center;">✓ ID saved successfully</div>`;
-      }
-    } catch (err) {
-      console.error("❌ Failed to save edit customer ID:", err);
-      if (idPreview) {
-        idPreview.innerHTML = `<img src="${croppedDataUrl}" alt="New ID" />
-          <div style="color: var(--accent-danger); font-size: 0.85em; margin-top: 4px; text-align:center;">❌ Save failed — try again</div>`;
-      }
-      alert("Failed to save ID image. Please try again.");
+      idPreview.innerHTML = `<img src="${croppedDataUrl}" alt="New ID" style="max-width: 200px; max-height: 150px; border-radius: 8px; border: 2px solid #10b981;" />
+        <div style="color: #10b981; font-size: 0.85em; margin-top: 4px;">✓ Image cropped (will save when you click Save)</div>`;
     }
     return; // Don't continue with reservation form logic
-  }
-
-  // ─── Check if this was triggered from the Print Form in edit reservation ───
-  if (window._printFormAfterIdUpload && window._printFormCustomerId) {
-    const printCustomerId = window._printFormCustomerId;
-    window._printFormCustomerId = null;
-    try {
-      await saveCustomerIdImage(printCustomerId, croppedDataUrl);
-      console.log("✅ ID saved from Print Form flow.");
-      await window._printFormAfterIdUpload(croppedDataUrl);
-    } catch (err) {
-      console.error("❌ Failed to save ID from Print Form:", err);
-      window._printFormAfterIdUpload = null;
-      await showFormPreview(null, {}, croppedDataUrl);
-    }
-    return;
   }
 
   // Original reservation flow continues below
@@ -4520,10 +4428,15 @@ document.getElementById("idUploadInput")?.addEventListener("change", function (e
   const reservation = resDoc.exists() ? { id: resDoc.id, ...resDoc.data() } : null;
   const customer = customers.find(c => c.id === latestCustomerId);
 
-    // 🔹 Save ID image directly to Firestore customer document
+    // 🔹 Save ID to Firestore under the customer document
   if (latestCustomerId && latestCroppedImageDataUrl) {
     try {
-      await saveCustomerIdImage(latestCustomerId, latestCroppedImageDataUrl);
+      await updateDoc(doc(db, "customers", latestCustomerId), {
+        idImageUrl: latestCroppedImageDataUrl
+      });
+      // update local cache too
+      const idx = customers.findIndex(c => c.id === latestCustomerId);
+      if (idx !== -1) customers[idx].idImageUrl = latestCroppedImageDataUrl;
       console.log("✅ ID saved to customer record.");
     } catch (err) {
       console.error("❌ Failed to save ID:", err);
@@ -5078,17 +4991,8 @@ function showEditDeletePopup(reservation) {
 
   // --- Print button handler ---
   overlay.querySelector("#printRegistrationFromEditBtn").onclick = async () => {
+    const customer = customers.find(c => c.id === reservation.customerId) || {};
     overlay.remove(); // close edit overlay
-
-    // Fetch fresh customer data from Firestore to ensure latest ID
-    let customer;
-    try {
-      const freshCustDoc = await getDoc(doc(db, "customers", reservation.customerId));
-      customer = freshCustDoc.exists() ? { id: freshCustDoc.id, ...freshCustDoc.data() } : {};
-    } catch (e) {
-      console.warn("Could not fetch fresh customer:", e);
-      customer = customers.find(c => c.id === reservation.customerId) || {};
-    }
 
     // ✅ If ID exists, skip upload
     if (customer.idImageUrl) {
@@ -5096,14 +5000,27 @@ function showEditDeletePopup(reservation) {
       return;
     }
 
-    // ❌ If no ID yet, ask to upload via the standard flow
-    // Use a callback so we don't overwrite the global cropAndContinueBtn handler
-    window._printFormAfterIdUpload = async (idUrl) => {
-      window._printFormAfterIdUpload = null;
-      await showFormPreview(reservation, customer, idUrl);
-    };
-    window._printFormCustomerId = reservation.customerId;
+    // ❌ If no ID yet, ask to upload
     ModalManager.open('idUploadModal');
+
+    document.getElementById("cropAndContinueBtn").onclick = async () => {
+      if (!cropperInstance) return;
+      const canvas = cropperInstance.getCroppedCanvas({ width: 300, height: 200 });
+      const croppedImageDataURL = canvas.toDataURL("image/jpeg");
+
+      cropperInstance.destroy();
+      cropperInstance = null;
+      ModalManager.close('idCropModal');
+
+      // Save ID
+      await updateDoc(doc(db, "customers", reservation.customerId), {
+        idImageUrl: croppedImageDataURL
+      });
+      const idx = customers.findIndex(c => c.id === reservation.customerId);
+      if (idx !== -1) customers[idx].idImageUrl = croppedImageDataURL;
+
+      await showFormPreview(reservation, customer, croppedImageDataURL);
+    };
   };
 
   // Cancel overlay
@@ -8358,8 +8275,11 @@ function showCustomerDetailsModal(customer) {
 
 
 //EDIT MODAL
+let editCustomerNewIdImage = null; // Store new ID image data URL
+
 function openEditCustomerModal(customer) {
   editingCustomerId = customer.id;
+  editCustomerNewIdImage = null; // Reset
 
   document.getElementById("editCustomerName").value = customer.name || "";
   document.getElementById("editCustomerPhone").value = customer.telephone || "";
@@ -8369,7 +8289,7 @@ function openEditCustomerModal(customer) {
   // Show current ID image or placeholder
   const idPreview = document.getElementById("editCustomerIdPreview");
   if (customer.idImageUrl) {
-    idPreview.innerHTML = `<img src="${customer.idImageUrl}" alt="Customer ID" />`;
+    idPreview.innerHTML = `<img src="${customer.idImageUrl}" alt="Customer ID" style="max-width: 200px; max-height: 150px; border-radius: 8px; border: 1px solid #ccc;" />`;
   } else {
     idPreview.innerHTML = `<span style="color: #999;">No ID image uploaded</span>`;
   }
@@ -8383,6 +8303,7 @@ function openEditCustomerModal(customer) {
   const cancelCustomerEditBtn = document.getElementById("cancelCustomerEditBtn");
   const hideEditCustomerModal = () => {
     ModalManager.close('editCustomerModal');
+    editCustomerNewIdImage = null; // Reset on close
   };
   if (closeEditCustomerBtn) closeEditCustomerBtn.onclick = hideEditCustomerModal;
   if (cancelCustomerEditBtn) cancelCustomerEditBtn.onclick = hideEditCustomerModal;
@@ -8446,8 +8367,7 @@ function openEditCustomerModal(customer) {
   try {
     const customerRef = doc(db, "customers", editingCustomerId);
     
-    // Build update object (ID image is now uploaded immediately on crop,
-    // so we only need to save contact info here)
+    // Build update object
     const updateData = {
       name,
       telephone: phone,
@@ -8455,10 +8375,16 @@ function openEditCustomerModal(customer) {
       email
     };
     
+    // Include new ID image if one was selected
+    if (editCustomerNewIdImage) {
+      updateData.idImageUrl = editCustomerNewIdImage;
+    }
+    
     await updateDoc(customerRef, updateData);
 
     alert("Customer updated successfully.");
     ModalManager.close('editCustomerModal');
+    editCustomerNewIdImage = null; // Reset
     await loadCustomers();
 
     // Refresh details modal if still open
