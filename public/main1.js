@@ -4453,7 +4453,7 @@ document.getElementById("idUploadInput")?.addEventListener("change", function (e
     const idPreview = document.getElementById("editCustomerIdPreview");
     if (idPreview) {
       idPreview.innerHTML = `<img src="${croppedDataUrl}" alt="New ID" />
-        <div style="color: #10b981; font-size: 0.85em; margin-top: 4px; text-align:center;">✓ Image cropped (will save when you click Save)</div>`;
+        <div style="color: #10b981; font-size: 0.85em; margin-top: 4px; text-align:center;">✓ New ID ready</div>`;
     }
     return; // Don't continue with reservation form logic
   }
@@ -8409,7 +8409,8 @@ function openEditCustomerModal(customer) {
 
 {
   const saveCustomerEditBtn = document.getElementById("saveCustomerEditBtn");
-  if (saveCustomerEditBtn) saveCustomerEditBtn.onclick = async () => {
+  if (saveCustomerEditBtn) saveCustomerEditBtn.onclick = async (e) => {
+  e.preventDefault();
   if (!editingCustomerId) return;
 
   const name = document.getElementById("editCustomerName").value.trim();
