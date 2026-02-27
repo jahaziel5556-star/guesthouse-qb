@@ -4442,18 +4442,44 @@ document.getElementById("idUploadInput")?.addEventListener("change", function (e
 
   ModalManager.close('idCropModal');
 
-  // Check if we're in edit customer ID mode
+  // Check if we're in edit customer ID mode — upload immediately
   if (window._editCustomerIdCropMode) {
     window._editCustomerIdCropMode = false;
-    
-    // Store cropped image for edit customer modal
-    editCustomerNewIdImage = croppedDataUrl;
-    
-    // Update preview in edit customer modal
+    const custId = editingCustomerId;
     const idPreview = document.getElementById("editCustomerIdPreview");
+    
+    if (!custId) {
+      console.error("No editingCustomerId set for edit customer ID upload");
+      return;
+    }
+    
+    // Show uploading state
     if (idPreview) {
-      idPreview.innerHTML = `<img src="${croppedDataUrl}" alt="New ID" />
-        <div style="color: #10b981; font-size: 0.85em; margin-top: 4px; text-align:center;">✓ New ID ready</div>`;
+      idPreview.innerHTML = `<img src="${croppedDataUrl}" alt="New ID" style="opacity:0.5;" />
+        <div style="color: var(--accent-warning); font-size: 0.85em; margin-top: 4px; text-align:center;">⏳ Uploading ID...</div>`;
+    }
+    
+    try {
+      const idUrl = await uploadIdImageToStorage(custId, croppedDataUrl);
+      await updateDoc(doc(db, "customers", custId), { idImageUrl: idUrl });
+      
+      // Update local cache
+      const idx = customers.findIndex(c => c.id === custId);
+      if (idx !== -1) customers[idx].idImageUrl = idUrl;
+      
+      // Show success in preview
+      if (idPreview) {
+        idPreview.innerHTML = `<img src="${idUrl}" alt="Customer ID" />
+          <div style="color: #10b981; font-size: 0.85em; margin-top: 4px; text-align:center;">✓ ID saved successfully</div>`;
+      }
+      console.log("✅ Edit customer ID uploaded and saved:", idUrl);
+    } catch (err) {
+      console.error("❌ Failed to upload edit customer ID:", err);
+      if (idPreview) {
+        idPreview.innerHTML = `<img src="${croppedDataUrl}" alt="New ID" />
+          <div style="color: var(--accent-danger); font-size: 0.85em; margin-top: 4px; text-align:center;">❌ Upload failed — try again</div>`;
+      }
+      alert("Failed to upload ID image. Please try again.");
     }
     return; // Don't continue with reservation form logic
   }
@@ -8329,11 +8355,8 @@ function showCustomerDetailsModal(customer) {
 
 
 //EDIT MODAL
-let editCustomerNewIdImage = null; // Store new ID image data URL
-
 function openEditCustomerModal(customer) {
   editingCustomerId = customer.id;
-  editCustomerNewIdImage = null; // Reset
 
   document.getElementById("editCustomerName").value = customer.name || "";
   document.getElementById("editCustomerPhone").value = customer.telephone || "";
@@ -8357,7 +8380,6 @@ function openEditCustomerModal(customer) {
   const cancelCustomerEditBtn = document.getElementById("cancelCustomerEditBtn");
   const hideEditCustomerModal = () => {
     ModalManager.close('editCustomerModal');
-    editCustomerNewIdImage = null; // Reset on close
   };
   if (closeEditCustomerBtn) closeEditCustomerBtn.onclick = hideEditCustomerModal;
   if (cancelCustomerEditBtn) cancelCustomerEditBtn.onclick = hideEditCustomerModal;
@@ -8421,7 +8443,8 @@ function openEditCustomerModal(customer) {
   try {
     const customerRef = doc(db, "customers", editingCustomerId);
     
-    // Build update object
+    // Build update object (ID image is now uploaded immediately on crop,
+    // so we only need to save contact info here)
     const updateData = {
       name,
       telephone: phone,
@@ -8429,21 +8452,10 @@ function openEditCustomerModal(customer) {
       email
     };
     
-    // Upload new ID image to Firebase Storage if one was selected
-    if (editCustomerNewIdImage) {
-      try {
-        const idUrl = await uploadIdImageToStorage(editingCustomerId, editCustomerNewIdImage);
-        updateData.idImageUrl = idUrl;
-      } catch (uploadErr) {
-        console.warn("ID upload failed, saving without image update:", uploadErr);
-      }
-    }
-    
     await updateDoc(customerRef, updateData);
 
     alert("Customer updated successfully.");
     ModalManager.close('editCustomerModal');
-    editCustomerNewIdImage = null; // Reset
     await loadCustomers();
 
     // Refresh details modal if still open
@@ -8991,7 +9003,12 @@ async function showInHouseGuestsForExtend() {
 
   // ID Crop Modal X button
   const closeIdCropBtn = document.getElementById("closeIdCropBtn");
-  if (closeIdCropBtn) closeIdCropBtn.onclick = () => ModalManager.close('idCropModal');
+  if (closeIdCropBtn) closeIdCropBtn.onclick = () => {
+    cropperInstance?.destroy();
+    cropperInstance = null;
+    window._editCustomerIdCropMode = false;
+    ModalManager.close('idCropModal');
+  };
 
   // Email Confirmation Modal (legacy) X and Cancel buttons
   const closeEmailConfirmationBtn = document.getElementById("closeEmailConfirmationBtn");
