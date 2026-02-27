@@ -4869,7 +4869,7 @@ function showEditDeletePopup(reservation) {
 
         <!-- Edit Stay Details -->
         <fieldset>
-          <legend><span class="material-icons" aria-hidden="true">edit</span> Stay Details</legend>
+          <legend><span class="material-icons" aria-hidden="true">edit</span> Edit Stay Details</legend>
           <div class="form-grid">
             <div class="compact-group">
               <label for="editRoom">Room</label>
