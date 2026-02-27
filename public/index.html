@@ -1378,13 +1378,13 @@
 
   <!-- ✂️ ID Cropping Modal -->
   <div id="idCropModal" class="modal" role="dialog" aria-modal="true" aria-label="Crop guest ID image" style="z-index: 2000;">
-    <div class="modal-content">
+    <div class="modal-content" style="max-height: 92vh; height: 92vh; margin: 3vh auto; display: flex; flex-direction: column; overflow: hidden; padding: 16px 24px;">
       <button class="close" id="closeIdCropBtn" aria-label="Close dialog">&times;</button>
-      <h3>Adjust the crop for the ID</h3>
+      <h3 style="margin: 0 0 8px 0; flex-shrink: 0;">Adjust the crop for the ID</h3>
       <div class="image-preview-container">
         <img id="idCropImage" alt="ID to crop" />
       </div>
-      <div class="modal-footer">
+      <div class="modal-footer" style="flex-shrink: 0; padding-top: 8px;">
         <button id="cropAndContinueBtn" class="btn btn-primary">Crop & Continue</button>
         <button id="cancelCropBtn" class="btn btn-secondary">Cancel</button>
       </div>

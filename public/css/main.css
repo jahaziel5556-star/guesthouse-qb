@@ -1925,13 +1925,17 @@
     /* Image preview/crop container */
     .image-preview-container {
       text-align: center;
-      margin: 16px 0;
+      margin: 8px 0;
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
     }
     
     .image-preview-container img {
       max-width: 100%;
-      max-height: 400px;
+      max-height: 100%;
       border-radius: var(--radius-md);
+      object-fit: contain;
     }
     
     /* Utility classes */
@@ -3204,9 +3208,8 @@
     .avail-grid-compact .guest-btn {
       padding: 3px 6px !important;
       font-size: 0.68rem !important;
-      max-width: 80px;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      max-width: none;
+      white-space: nowrap;
     }
 
     /* Edit Customer ID Preview - larger than the inline preview */

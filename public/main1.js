@@ -4592,27 +4592,8 @@ function clearAddReservationForm() {
   };
 }
 
-window.addEventListener("click", (e) => {
-  // Disable click-outside-to-close for important modals
-  const blockCloseIds = ["paymentPromptModal", "addPaymentModal"];
-  for (let id of blockCloseIds) {
-    if (e.target.id === id) return;
-  }
-
-  // Normal modals - use ModalManager for consistency
-  if (e.target.id === "addReservationModal") {
-    ModalManager.close('addReservationModal');
-  }
-  if (e.target.id === "availabilityModal") {
-    ModalManager.close('availabilityModal');
-  }
-  if (e.target.id === "editDeletePopup") {
-    ModalManager.close('editDeletePopup');
-  }
-  if (e.target.id === "managePaymentModal") {
-    ModalManager.close('managePaymentModal');
-  }
-});
+// Click-outside-to-close DISABLED for all modals — user must use explicit close/cancel buttons
+// window.addEventListener("click", ...) removed to prevent accidental closure
 
 
 
@@ -5467,7 +5448,7 @@ async function openLateFeeModal(reservation) {
   
   lateFeeOverlay.querySelector("#closeLateFeeModal").onclick = closeLateFeeModal;
   lateFeeOverlay.querySelector("#cancelLateFee").onclick = closeLateFeeModal;
-  lateFeeOverlay.onclick = (e) => { if (e.target === lateFeeOverlay) closeLateFeeModal(); };
+  // Outside click disabled — use X or Cancel buttons
   
   // Save late fee handler
   const saveLateFee = async (shouldPrint = false) => {
@@ -8947,14 +8928,9 @@ async function showInHouseGuestsForExtend() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// MODAL BACKDROP CLICK-TO-CLOSE (click outside modal content to close)
+// MODAL BACKDROP CLICK-TO-CLOSE — DISABLED
+// Clicking outside modals no longer closes them. Use X or Cancel buttons.
 // ═══════════════════════════════════════════════════════════════════════════
-document.addEventListener('click', (e) => {
-  // Only handle clicks directly on the modal backdrop (not the content inside)
-  if (e.target.classList.contains('modal') && e.target.style.display === 'block') {
-    ModalManager.close(e.target.id);
-  }
-});
 
 function openRoomHistoryModal() {
   ModalManager.open('roomHistoryModal');
@@ -10946,7 +10922,7 @@ function renderDashboardAvailabilityGrid(reservations, customersList) {
         
         html += `<td class="cell-occupied ${checkStatusClass}">
           <button class="guest-btn ${statusClass}" data-res-id="${res.id}" title="${name} - ${formatDateDMY(res.arrivalDate)} to ${formatDateDMY(res.departureDate)}">
-            ${name.split(' ')[0]}
+            ${name}
           </button>
           ${statusIndicator}
         </td>`;
