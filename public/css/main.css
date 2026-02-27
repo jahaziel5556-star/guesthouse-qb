@@ -3208,3 +3208,27 @@
       overflow: hidden;
       text-overflow: ellipsis;
     }
+
+    /* Edit Customer ID Preview - larger than the inline preview */
+    .edit-customer-id-preview {
+      width: 100%;
+      max-width: 320px;
+      min-height: 80px;
+      margin: 0 auto 8px;
+      padding: 12px;
+      text-align: center;
+      background: var(--bg-tertiary);
+      border: 1px dashed var(--border-medium);
+      border-radius: var(--radius-md);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .edit-customer-id-preview img {
+      max-width: 100%;
+      max-height: 200px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border-light);
+      object-fit: contain;
+    }

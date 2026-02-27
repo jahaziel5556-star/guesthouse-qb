@@ -4159,10 +4159,16 @@ document.getElementById("yesPaymentBtn")?.addEventListener("click", async () => 
 
 /**
  * "No, skip payment" button handler.
- * Closes the payment prompt without recording a payment.
+ * Closes the payment prompt and continues to ID/registration flow.
  */
 document.getElementById("noPaymentBtn")?.addEventListener("click", () => {
   ModalManager.close('paymentPromptModal');
+  const customer = customers.find(c => c.id === latestCustomerId);
+  if (customer?.idImageUrl) {
+    showRegistrationFormWithSavedId(customer);
+  } else {
+    ModalManager.open('registrationPromptModal');
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -4446,10 +4452,29 @@ document.getElementById("idUploadInput")?.addEventListener("change", function (e
     // Update preview in edit customer modal
     const idPreview = document.getElementById("editCustomerIdPreview");
     if (idPreview) {
-      idPreview.innerHTML = `<img src="${croppedDataUrl}" alt="New ID" style="max-width: 200px; max-height: 150px; border-radius: 8px; border: 2px solid #10b981;" />
-        <div style="color: #10b981; font-size: 0.85em; margin-top: 4px;">✓ Image cropped (will save when you click Save)</div>`;
+      idPreview.innerHTML = `<img src="${croppedDataUrl}" alt="New ID" />
+        <div style="color: #10b981; font-size: 0.85em; margin-top: 4px; text-align:center;">✓ Image cropped (will save when you click Save)</div>`;
     }
     return; // Don't continue with reservation form logic
+  }
+
+  // ─── Check if this was triggered from the Print Form in edit reservation ───
+  if (window._printFormAfterIdUpload && window._printFormCustomerId) {
+    const printCustomerId = window._printFormCustomerId;
+    window._printFormCustomerId = null;
+    try {
+      const idUrl = await uploadIdImageToStorage(printCustomerId, croppedDataUrl);
+      await updateDoc(doc(db, "customers", printCustomerId), { idImageUrl: idUrl });
+      const idx = customers.findIndex(c => c.id === printCustomerId);
+      if (idx !== -1) customers[idx].idImageUrl = idUrl;
+      console.log("✅ ID uploaded from Print Form flow.");
+      await window._printFormAfterIdUpload(idUrl);
+    } catch (err) {
+      console.error("❌ Failed to upload ID from Print Form:", err);
+      window._printFormAfterIdUpload = null;
+      await showFormPreview(null, {}, croppedDataUrl);
+    }
+    return;
   }
 
   // Original reservation flow continues below
@@ -5024,8 +5049,17 @@ function showEditDeletePopup(reservation) {
 
   // --- Print button handler ---
   overlay.querySelector("#printRegistrationFromEditBtn").onclick = async () => {
-    const customer = customers.find(c => c.id === reservation.customerId) || {};
     overlay.remove(); // close edit overlay
+
+    // Fetch fresh customer data from Firestore to ensure latest ID
+    let customer;
+    try {
+      const freshCustDoc = await getDoc(doc(db, "customers", reservation.customerId));
+      customer = freshCustDoc.exists() ? { id: freshCustDoc.id, ...freshCustDoc.data() } : {};
+    } catch (e) {
+      console.warn("Could not fetch fresh customer:", e);
+      customer = customers.find(c => c.id === reservation.customerId) || {};
+    }
 
     // ✅ If ID exists, skip upload
     if (customer.idImageUrl) {
@@ -5033,33 +5067,14 @@ function showEditDeletePopup(reservation) {
       return;
     }
 
-    // ❌ If no ID yet, ask to upload
-    ModalManager.open('idUploadModal');
-
-    document.getElementById("cropAndContinueBtn").onclick = async () => {
-      if (!cropperInstance) return;
-      const canvas = cropperInstance.getCroppedCanvas({ width: 300, height: 200 });
-      const croppedImageDataURL = canvas.toDataURL("image/jpeg");
-
-      cropperInstance.destroy();
-      cropperInstance = null;
-      ModalManager.close('idCropModal');
-
-      // Upload ID to Firebase Storage, then save URL
-      try {
-        const idUrl = await uploadIdImageToStorage(reservation.customerId, croppedImageDataURL);
-        await updateDoc(doc(db, "customers", reservation.customerId), {
-          idImageUrl: idUrl
-        });
-        const idx = customers.findIndex(c => c.id === reservation.customerId);
-        if (idx !== -1) customers[idx].idImageUrl = idUrl;
-        await showFormPreview(reservation, customer, idUrl);
-      } catch (err) {
-        console.error("❌ Failed to upload ID:", err);
-        // Fallback: still show form with data URL
-        await showFormPreview(reservation, customer, croppedImageDataURL);
-      }
+    // ❌ If no ID yet, ask to upload via the standard flow
+    // Use a callback so we don't overwrite the global cropAndContinueBtn handler
+    window._printFormAfterIdUpload = async (idUrl) => {
+      window._printFormAfterIdUpload = null;
+      await showFormPreview(reservation, customer, idUrl);
     };
+    window._printFormCustomerId = reservation.customerId;
+    ModalManager.open('idUploadModal');
   };
 
   // Cancel overlay
@@ -8328,7 +8343,7 @@ function openEditCustomerModal(customer) {
   // Show current ID image or placeholder
   const idPreview = document.getElementById("editCustomerIdPreview");
   if (customer.idImageUrl) {
-    idPreview.innerHTML = `<img src="${customer.idImageUrl}" alt="Customer ID" style="max-width: 200px; max-height: 150px; border-radius: 8px; border: 1px solid #ccc;" />`;
+    idPreview.innerHTML = `<img src="${customer.idImageUrl}" alt="Customer ID" />`;
   } else {
     idPreview.innerHTML = `<span style="color: #999;">No ID image uploaded</span>`;
   }
@@ -10707,9 +10722,13 @@ async function fillDashboard() {
   // Each card shows a key metric for at-a-glance status
   // ─────────────────────────────────────────────────────────────────────────
   
-  // Total reservations (all time)
+  // Total reservations (all time) — count extensions as additional stays
+  const extensionCount = reservations.reduce((sum, r) => {
+    const hist = r.history || [];
+    return sum + hist.filter(h => h.type === 'extended').length;
+  }, 0);
   const cardTotal = document.getElementById('card_totalReservations');
-  if (cardTotal) cardTotal.textContent = reservations.length;
+  if (cardTotal) cardTotal.textContent = reservations.length + extensionCount;
   
   // Today's check-ins (guests arriving today)
   const cardCheckins = document.getElementById('card_todayCheckins');
