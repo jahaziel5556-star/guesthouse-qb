@@ -217,6 +217,11 @@ const ModalManager = {
     const modal = document.getElementById(modalId);
     if (!modal) return false;
     
+    // Blur focused element inside the modal before hiding (prevents aria-hidden warning)
+    if (modal.contains(document.activeElement)) {
+      document.activeElement.blur();
+    }
+    
     modal.style.display = 'none';
     modal.setAttribute('aria-hidden', 'true');
     
