@@ -1373,9 +1373,13 @@ function safeOnSnapshot(ref, onNext) {
  * @returns {Promise<string>} public download URL
  */
 async function uploadIdImageToStorage(customerId, dataUrl) {
-  // Convert data URL to blob
-  const response = await fetch(dataUrl);
-  const blob = await response.blob();
+  // Convert data URL to blob without fetch (avoids CSP connect-src blocking data: URLs)
+  const [header, base64] = dataUrl.split(',');
+  const mime = header.match(/:(.*?);/)[1];
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  const blob = new Blob([bytes], { type: mime });
 
   // Try to convert to WebP for smaller size, fall back to original
   let uploadBlob = blob;
