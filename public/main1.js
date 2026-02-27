@@ -59,6 +59,12 @@ import {
   onSnapshot,
   getDoc
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import {
+  getStorage,
+  ref as storageRef,
+  uploadBytes,
+  getDownloadURL
+} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
 
 /* ╔═══════════════════════════════════════════════════════════════════════════════╗
    ║                    SECTION 1: APP CONFIGURATION                               ║
@@ -581,6 +587,7 @@ async function initializeApp() {
   const app = initializeFirebaseApp(FIREBASE_CONFIG);
   const db = getFirestore(app);  // Database connection
   const auth = getAuth(app);     // Authentication service
+  const storage = getStorage(app); // Cloud Storage for ID images
 
   // Enable offline mode - app works even without internet
   try {
@@ -1363,21 +1370,52 @@ function safeOnSnapshot(ref, onNext) {
 
 
 /**
- * Save a cropped ID image directly to the customer's Firestore document as a data URL.
- * No Firebase Storage involved — the base64 JPEG is stored in the idImageUrl field.
- * Cropped images are small (~10-30KB) so this is efficient and avoids CSP/Storage issues.
+ * Upload a cropped ID image to Firebase Cloud Storage and save the download URL
+ * to the customer's Firestore document. Accessible from any device.
+ *
+ * Uses atob + Uint8Array to convert the data URL to a Blob (avoids CSP fetch restriction).
+ * Falls back to storing data URL directly in Firestore if Storage upload fails.
+ *
  * @param {string} customerId - Firestore customer doc ID
  * @param {string} dataUrl - base64 data URL from canvas.toDataURL
- * @returns {Promise<string>} the same data URL (now saved)
+ * @returns {Promise<string>} Firebase Storage download URL or data URL fallback
  */
 async function saveCustomerIdImage(customerId, dataUrl) {
-  console.log("📤 saveCustomerIdImage called for customer:", customerId, "dataUrl length:", dataUrl?.length);
-  await updateDoc(doc(db, "customers", customerId), { idImageUrl: dataUrl });
-  // Update local cache
+  console.log("📤 saveCustomerIdImage called for:", customerId);
+
+  let savedUrl = dataUrl; // Default: store as data URL
+
+  try {
+    // 1. Convert data URL to Blob (no fetch needed — avoids CSP issues)
+    const parts = dataUrl.split(',');
+    const mime = parts[0].match(/:(.*?);/)[1];
+    const raw = atob(parts[1]);
+    const arr = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+    const blob = new Blob([arr], { type: mime });
+    console.log("📤 Blob ready:", blob.size, "bytes");
+
+    // 2. Upload to Firebase Storage
+    const fileName = `${customerId}.jpg`;
+    const fileRef = storageRef(storage, `customer-ids/${fileName}`);
+    console.log("📤 Uploading to Firebase Storage:", `customer-ids/${fileName}`);
+    await uploadBytes(fileRef, blob, { contentType: mime });
+
+    // 3. Get the public download URL
+    savedUrl = await getDownloadURL(fileRef);
+    console.log("✅ Firebase Storage upload success! URL:", savedUrl);
+  } catch (storageErr) {
+    console.warn("⚠️ Firebase Storage upload failed, saving data URL directly to Firestore:", storageErr.message);
+    savedUrl = dataUrl; // Fallback: store the base64 data URL directly
+  }
+
+  // 4. Save URL (or data URL fallback) to customer Firestore doc + local cache
+  await updateDoc(doc(db, "customers", customerId), { idImageUrl: savedUrl });
   const idx = customers.findIndex(c => c.id === customerId);
-  if (idx !== -1) customers[idx].idImageUrl = dataUrl;
-  console.log("✅ ID image saved to Firestore for customer:", customerId);
-  return dataUrl;
+  if (idx !== -1) customers[idx].idImageUrl = savedUrl;
+  console.log("✅ ID saved to customer record");
+
+  return savedUrl;
 }
 
 let uploadedIdFile = null;
