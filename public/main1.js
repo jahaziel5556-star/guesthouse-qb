@@ -2383,10 +2383,8 @@ async function openManagePaymentModal(reservation) {
   const customer = customers.find(c => c.id === reservation.customerId) || {};
   const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate);
 
-  // Fetch all payments for this reservation (including voided for display)
-  const paymentsSnapshot = await getDocs(collection(db, "payments"));
-  const allPayments = paymentsSnapshot.docs
-    .map(doc => ({ id: doc.id, ...doc.data() }))
+  // Fetch all payments for this reservation from cache (live-updated by onSnapshot)
+  const allPayments = (window._allPaymentsCache || [])
     .filter(p => p.reservationId === reservation.id);
   
   // Active payments exclude voided ones (for calculations)
@@ -3212,12 +3210,10 @@ if (summaryBtn) {
         }, 0);
         const total = baseTotal + totalAdjustment;
         
-        // Get all existing payments to calculate total paid
-        const paymentsSnapshot = await getDocs(collection(db, "payments"));
-        const payments = paymentsSnapshot.docs
-          .map(doc => ({ id: doc.id, ...doc.data() }))
-          .filter(p => p.reservationId === reservation.id);
-        const totalPaid = payments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) + addAmount;
+        // Calculate total paid from cache (new payment not in cache yet, so add manually)
+        const cachedPayments = (window._allPaymentsCache || [])
+          .filter(p => p.reservationId === reservation.id && !p.voided);
+        const totalPaid = cachedPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) + addAmount;
         
         // Update reservation status: fully_paid if all paid, otherwise partially_paid
         const newStatus = totalPaid >= total ? "fully_paid" : "partially_paid";
@@ -4231,10 +4227,9 @@ document.getElementById("confirmPaymentBtn")?.addEventListener("click", async ()
     });
 
     // Recompute paid/remaining to set paymentStatus
-    const paymentsSnapshot = await getDocs(collection(db, "payments"));
-    const payments = paymentsSnapshot.docs
-      .map(d => ({ id: d.id, ...d.data() }))
-      .filter(p => p.reservationId === latestReservationId);
+    // Calculate total paid from cache + newly saved payment (not in cache yet)
+    const cachedPayments = (window._allPaymentsCache || [])
+      .filter(p => p.reservationId === latestReservationId && !p.voided);
 
     const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate);
     const baseTotal = (parseFloat(reservation.rate) || 0) * nights;
@@ -4244,7 +4239,7 @@ document.getElementById("confirmPaymentBtn")?.addEventListener("click", async ()
       return sum + (adj.type === 'discount' ? -adj.amount : adj.amount);
     }, 0);
     const totalDue = baseTotal + totalAdjustment;
-    const totalPaid = payments.reduce((s, p) => s + parseFloat(p.amount || 0), 0);
+    const totalPaid = cachedPayments.reduce((s, p) => s + parseFloat(p.amount || 0), 0) + amount;
     const newStatus = totalPaid >= totalDue ? "fully_paid" : "partially_paid";
 
     await updateDoc(doc(db, "reservations", latestReservationId), {
@@ -8384,9 +8379,8 @@ async function showTransactionsModal(customer) {
   const modal = document.getElementById("transactionListModal");
   const list = document.getElementById("transactionListContainer");
   list.innerHTML = "";
-  const paymentsSnapshot = await getDocs(collection(db, "payments"));
-  let payments = paymentsSnapshot.docs
-    .map(doc => ({ id: doc.id, ...doc.data() }))
+  // Use live cache instead of fetching all payments from Firestore
+  let payments = (window._allPaymentsCache || [])
     .filter(p => p.customerId === customer.id);
   // Sort by receipt number ascending, then by timestamp descending if needed
   payments.sort((a, b) => {
@@ -8428,7 +8422,7 @@ async function showTransactionsModal(customer) {
         let reservation = null;
         if (p.reservationId) {
           const resDoc = await getDoc(doc(db, "reservations", p.reservationId));
-          reservation = resDoc.exists() ? resDoc.data() : null;
+          reservation = resDoc.exists() ? { id: resDoc.id, ...resDoc.data() } : null;
         }
         showReceiptDetailModal(p, reservation);
       };
