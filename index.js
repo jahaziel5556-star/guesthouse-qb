@@ -1083,11 +1083,10 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       const detail = err.response?.data;
       const msg = JSON.stringify(detail || err);
       if (payload.DocNumber && /DocNumber|Duplicate|duplicate/i.test(msg)) {
-        // Log the duplicate but don't modify the receipt number
-        log(`Duplicate DocNumber detected for: ${payload.DocNumber} - this may already exist in QuickBooks`);
-        // Return success with a note that it may already exist
+        log(`Duplicate DocNumber detected for: ${payload.DocNumber} - already exists in QuickBooks`);
         return res.json({
           success: true,
+          duplicate: true,
           receiptId: 'existing',
           docNumber: payload.DocNumber,
           grossEntered: grossAmount.toFixed(2),
@@ -1095,7 +1094,7 @@ app.post("/payment-to-quickbooks", async (req, res) => {
           taxCalculated: taxAmount.toFixed(2),
           taxRatePercent: combinedRate.toFixed(4),
           mode: "TaxInclusive",
-          note: "Receipt may already exist in QuickBooks"
+          note: "Receipt already exists in QuickBooks — no duplicate created"
         });
       } else {
         throw err;

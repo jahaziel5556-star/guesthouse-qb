@@ -175,12 +175,12 @@
           <span class="material-icons">security</span>
           Audit
         </button>
-        <button id="bulkQBResyncBtn" class="btn btn-secondary admin-only" title="Send unsent receipts to QuickBooks" style="display:none; background: rgba(124, 58, 237, 0.1); border-color: #7c3aed;">
-          <span class="material-icons" style="color: #7c3aed;">cloud_upload</span>
-          <span style="color: #7c3aed;">Send to QB</span>
+        <button id="bulkQBResyncBtn" class="btn btn-secondary admin-only" title="Send unsent receipts to QuickBooks" style="display:none;">
+          <span class="material-icons">cloud_upload</span>
+          Send to QB
         </button>
-        <button id="manualQBAuthBtn" class="btn-icon" title="QuickBooks Auth" style="background: rgba(239, 68, 68, 0.1); border-color: var(--accent-danger);">
-          <span class="material-icons" style="color: var(--accent-danger);">sync</span>
+        <button id="manualQBAuthBtn" class="btn-icon" title="QuickBooks Auth">
+          <span class="material-icons">sync</span>
         </button>
         <div class="notification-badge">
           <button class="btn-icon" title="Notifications">
@@ -477,7 +477,7 @@
        ALL ORIGINAL MODALS (UNCHANGED)
        ═══════════════════════════════════════════════════════════════ -->
 
-  <!-- 🔲 Add Reservation Modal -->
+  <!-- Add Reservation Modal -->
   <div id="addReservationModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="addReservationTitle">
     <div class="modal-content modal-compact">
       <button class="close" id="closeAddReservationBtn" aria-label="Close dialog">&times;</button>
@@ -561,7 +561,7 @@
     </div>
   </div>
 
-  <!-- 📊 Availability Grid Modal -->
+  <!-- Availability Grid Modal -->
   <div id="availabilityModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="availabilityTitle">
     <div class="modal-content avail-grid-modal">
       <button class="close" id="closeAvailabilityBtn" aria-label="Close dialog">&times;</button>
@@ -600,8 +600,8 @@
             <div class="legend-item"><span class="legend-color unpaid"></span>Unpaid</div>
           </div>
           <div class="avail-grid-toolbar-actions">
-            <button id="downloadCsvBtn" class="btn btn-secondary btn-sm">⬇ CSV</button>
-            <button id="printGridBtn" class="btn btn-secondary btn-sm">🖨️ Print</button>
+            <button id="downloadCsvBtn" class="btn btn-secondary btn-sm">CSV</button>
+            <button id="printGridBtn" class="btn btn-secondary btn-sm">Print</button>
           </div>
         </div>
         <div id="availabilityGrid" class="avail-grid-scroll"></div>
@@ -609,7 +609,7 @@
     </div>
   </div>
 
-  <!-- ✏️ Edit Customer Modal -->
+  <!-- Edit Customer Modal -->
   <div id="editCustomerModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="editCustomerTitle">
     <div class="modal-content modal-compact">
       <button class="close" id="closeEditCustomerBtn" aria-label="Close dialog">&times;</button>
@@ -660,7 +660,7 @@
     </div>
   </div>
 
-  <!-- ✏️ Edit/Delete Popup Modal -->
+  <!-- Edit/Delete Popup Modal -->
   <div id="editDeletePopup" class="modal" role="dialog" aria-modal="true" aria-label="Reservation details">
     <div class="modal-content" id="editDeleteContent">
       <button id="printReservationBtn" class="btn btn-secondary">
@@ -672,9 +672,9 @@
     </div>
   </div>
 
-  <!-- 🛌 Extend Reservation Modal -->
+  <!-- Extend Reservation Modal -->
 
-  <!-- 🏠 In-House Guests Modal (for Extend Stay flow) -->
+  <!-- In-House Guests Modal (for Extend Stay flow) -->
   <div id="inHouseGuestsModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="inHouseGuestsTitle" style="z-index: 2100;">
     <div class="modal-content modal-scrollable" style="max-width:550px;">
       <button class="close" id="closeInHouseGuestsBtn" aria-label="Close dialog">&times;</button>
@@ -709,6 +709,15 @@
         </p>
       </div>
 
+      <div id="extendSummaryBox" style="display:none; background:var(--bg-tertiary); padding:10px 14px; border-radius:8px; margin-bottom:12px; border-left:4px solid var(--accent-primary);">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; font-size:0.85em;">
+          <div><span style="color:var(--text-muted);">Current departure:</span> <strong id="extendCurrentDep">—</strong></div>
+          <div><span style="color:var(--text-muted);">New departure:</span> <strong id="extendNewDep">—</strong></div>
+          <div><span style="color:var(--text-muted);">Additional nights:</span> <strong id="extendAdditionalNights">—</strong></div>
+          <div><span style="color:var(--text-muted);">Expected cost:</span> <strong id="extendExpectedCost">—</strong></div>
+        </div>
+      </div>
+
       <form id="extendReservationForm" class="compact-form" novalidate>
         <div class="form-grid">
           <div class="compact-group">
@@ -740,7 +749,7 @@
 
         <div class="modal-footer">
           <button type="button" id="cancelExtendReservationBtn" class="btn btn-secondary">Cancel</button>
-          <button type="submit" id="confirmExtendReservationBtn" class="btn btn-primary">
+          <button type="button" id="confirmExtendReservationBtn" class="btn btn-primary">
             <span class="material-icons" aria-hidden="true" style="font-size:18px;">save</span>
             Confirm Extension
           </button>
@@ -753,7 +762,7 @@
     </div>
   </div>
 
-  <!-- 💳 Payment Prompt Modal -->
+  <!-- Payment Prompt Modal -->
   <div id="paymentPromptModal" class="modal" role="dialog" aria-modal="true" aria-label="Payment prompt">
     <div class="modal-content modal-sm">
       <button class="close" id="closePaymentPromptBtn" aria-label="Close dialog">&times;</button>
@@ -765,7 +774,7 @@
     </div>
   </div>
 
-  <!-- 💰 Add Payment Modal -->
+  <!-- Add Payment Modal -->
   <div id="addPaymentModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="addPaymentTitle">
     <div class="modal-content modal-compact">
       <button class="close" id="closeAddPaymentBtn" aria-label="Close dialog">&times;</button>
@@ -792,7 +801,7 @@
     </div>
   </div>
 
-  <!-- 📊 Summary Modal -->
+  <!-- Summary Modal -->
   <div id="summaryModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="summaryTitle">
     <div class="modal-content modal-lg modal-scrollable">
       <button id="closeSummaryModal" class="close" aria-label="Close dialog">&times;</button>
@@ -819,11 +828,11 @@
           <input type="date" id="summaryEnd">
         </div>
         <button id="loadSummaryBtn" class="btn btn-primary">Load Summary</button>
-        <button id="printSummaryBtn" class="btn btn-secondary">🖨 Print</button>
+        <button id="printSummaryBtn" class="btn btn-secondary">Print</button>
       </div>
 
       <div class="table-container" style="overflow-x: auto;">
-        <table id="summaryTable" style="min-width: 1200px;">
+        <table id="summaryTable" style="min-width: 1400px;">
           <thead>
             <tr>
               <th>Guest Name</th>
@@ -834,11 +843,12 @@
               <th>Nights</th>
               <th>Guests</th>
               <th>Rate</th>
-              <th>Total Due</th>
-              <th>Total Paid</th>
+              <th>Total Cost</th>
+              <th>Paid (All-time)</th>
+              <th>Paid (Period)</th>
               <th>Balance</th>
               <th>Status</th>
-              <th>Receipts</th>
+              <th>Receipts (Period)</th>
               <th>Created By</th>
               <th>Notes</th>
             </tr>
@@ -851,22 +861,22 @@
     </div>
   </div>
 
-  <!-- 🧾 Manage Payment Modal -->
+  <!-- Manage Payment Modal -->
   <div id="managePaymentModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="managePaymentTitle">
     <div class="modal-content">
       <button class="close" id="closeManagePaymentBtn" aria-label="Close dialog">&times;</button>
       <h3 id="managePaymentTitle"><span class="material-icons" aria-hidden="true">account_balance_wallet</span> Manage Payments</h3>
 
       <div class="payment-box">
-        <p><strong>Total Due:</strong> $<span id="totalDue">0</span></p>
-        <p><strong>Total Paid:</strong> $<span id="totalPaid">0</span></p>
-        <p><strong>Balance Remaining:</strong> $<span id="balanceRemaining">0</span></p>
+        <p><strong>Total Cost:</strong> $<span id="totalDue">0</span> <span id="nightsDisplay" style="font-size:0.85em;color:var(--text-muted);"></span></p>
+        <p><strong>Total Paid:</strong> $<span id="totalPaid">0</span> <span id="creditsSubtotal" style="font-size:0.85em;color:var(--accent-primary);display:none;">(includes $<span id="creditsAmount">0</span> in credits)</span></p>
+        <p><strong>Balance Remaining:</strong> $<span id="balanceRemaining">0</span> <span id="overdueTag" style="display:none;background:#ef4444;color:#fff;padding:2px 8px;border-radius:4px;font-size:0.75em;font-weight:600;margin-left:8px;">OVERDUE</span></p>
         <p id="adjustmentDisplay" style="display:none;"><strong>Adjustments:</strong> $<span id="balanceAdjustment">0</span></p>
       </div>
 
       <!-- Admin Balance Adjustment Section -->
       <div id="adminBalanceAdjustSection" style="display:none; margin: 16px 0; padding: 12px; background: var(--bg-tertiary); border-radius: 8px; border: 1px dashed var(--accent-warning);">
-        <h4 style="margin: 0 0 12px 0; color: var(--accent-warning);">⚙️ Admin: Adjust Balance</h4>
+        <h4 style="margin: 0 0 12px 0; color: var(--accent-warning);">Admin: Adjust Balance</h4>
         <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
           <select id="adjustmentType" style="padding: 8px; border-radius: 6px; border: 1px solid var(--border-medium); background: var(--bg-secondary); color: var(--text-primary);">
             <option value="discount">Discount (-)</option>
@@ -877,6 +887,19 @@
           <button id="applyAdjustmentBtn" class="btn btn-primary" style="background: var(--accent-warning); padding: 8px 16px;">Apply</button>
         </div>
         <div id="adjustmentHistory" style="margin-top: 12px; font-size: 0.85em;"></div>
+      </div>
+
+      <!-- Admin Credit/Deduction Section (adds to Total Paid, not Total Cost) -->
+      <div id="adminCreditSection" style="display:none; margin: 16px 0; padding: 12px; background: var(--bg-tertiary); border-radius: 8px; border: 1px dashed var(--accent-primary);">
+        <h4 style="margin: 0 0 12px 0; color: var(--accent-primary);">Admin: Apply Credit / Deduction</h4>
+        <p style="margin:0 0 10px; font-size:0.8em; color:var(--text-muted);">Credits count toward Total Paid without changing Total Cost. Use for write-offs, goodwill credits, or balance corrections.</p>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+          <input type="number" id="creditAmount" step="0.01" min="0.01" placeholder="Amount" style="padding: 8px; width: 120px; border-radius: 6px; border: 1px solid var(--border-medium); background: var(--bg-secondary); color: var(--text-primary);" />
+          <input type="text" id="creditReason" placeholder="Reason (required)" style="padding: 8px; flex: 1; min-width: 150px; border-radius: 6px; border: 1px solid var(--border-medium); background: var(--bg-secondary); color: var(--text-primary);" />
+          <label style="display:flex;align-items:center;gap:4px;font-size:0.85em;color:var(--text-muted);cursor:pointer;white-space:nowrap;"><input type="checkbox" id="creditShowOnForm" checked /> Show on form</label>
+          <button id="applyCreditBtn" class="btn btn-primary" style="padding: 8px 16px;">Apply Credit</button>
+        </div>
+        <div id="creditHistory" style="margin-top: 12px; font-size: 0.85em;"></div>
       </div>
 
       <div id="paymentHistoryList" class="payment-history"></div>
@@ -893,15 +916,15 @@
       </select>
 
       <div class="modal-footer">
-        <button id="savePaymentBtn" class="btn btn-primary">💾 Save Payment</button>
-        <button id="send-receipt-email-btn" class="btn btn-secondary">📱 SMS Receipt</button>
-        <button id="print-receipt-btn" class="btn btn-secondary">🖨️ Print Receipt</button>
+        <button id="savePaymentBtn" class="btn btn-primary">Save Payment</button>
+        <button id="send-receipt-email-btn" class="btn btn-secondary">SMS Receipt</button>
+        <button id="print-receipt-btn" class="btn btn-secondary">Print Receipt</button>
         <button id="cancelPaymentBtn" class="btn btn-secondary">Cancel</button>
       </div>
     </div>
   </div>
 
-  <!-- 🔽 Select Receipt for Email Modal -->
+  <!-- Select Receipt for Email Modal -->
   <div id="selectReceiptModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="selectReceiptTitle">
     <div class="modal-content modal-sm">
       <button class="close" id="closeSelectReceiptModalBtn" aria-label="Close dialog">&times;</button>
@@ -910,26 +933,26 @@
         <option value="">-- Select Receipt --</option>
       </select>
       <div class="modal-footer">
-        <button id="sendSelectedReceiptBtn" class="btn btn-primary">📧 Send</button>
+        <button id="sendSelectedReceiptBtn" class="btn btn-primary">Send</button>
         <button id="cancelReceiptSelectBtn" class="btn btn-secondary">Cancel</button>
       </div>
     </div>
   </div>
 
-  <!-- 🖨️ Select Receipt for Printing -->
+  <!-- Select Receipt for Printing -->
   <div id="printReceiptModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="printReceiptTitle">
     <div class="modal-content modal-sm">
       <button class="close" id="closePrintReceiptModalBtn" aria-label="Close dialog">&times;</button>
       <h3 id="printReceiptTitle">Select Receipt(s) to Print</h3>
       <div id="printReceiptList"></div>
       <div class="modal-footer">
-        <button id="confirmPrintReceiptBtn" class="btn btn-primary">🖨️ Print</button>
+        <button id="confirmPrintReceiptBtn" class="btn btn-primary">Print</button>
         <button id="cancelPrintReceiptBtn" class="btn btn-secondary">Cancel</button>
       </div>
     </div>
   </div>
 
-  <!-- 🔧 Room Info/Maintenance Modal -->
+  <!-- Room Info/Maintenance Modal -->
   <div id="maintenanceModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="maintenanceTitle">
     <div class="modal-content modal-sm">
       <button class="close" id="closeMaintenanceModalBtn" aria-label="Close dialog">&times;</button>
@@ -945,8 +968,8 @@
           <div><strong>Payment:</strong> <span id="roomGuestPayment"></span></div>
         </div>
         <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
-          <button id="roomViewReservationBtn" class="btn btn-ghost" style="font-size:0.8em;">📋 View Reservation</button>
-          <button id="roomCheckoutBtn" class="btn btn-ghost" style="font-size:0.8em; color:var(--accent-danger);">🚪 Checkout</button>
+          <button id="roomViewReservationBtn" class="btn btn-ghost" style="font-size:0.8em;">View Reservation</button>
+          <button id="roomCheckoutBtn" class="btn btn-ghost" style="font-size:0.8em; color:var(--accent-danger);">Checkout</button>
         </div>
       </div>
       
@@ -958,7 +981,7 @@
     </div>
   </div>
 
-  <!-- 📊 Batch Close History Modal -->
+  <!-- Batch Close History Modal -->
   <div id="batchCloseHistoryModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="batchCloseHistoryTitle">
     <div class="modal-content modal-lg modal-scrollable">
       <button class="close" id="closeBatchCloseHistoryModalBtn" aria-label="Close dialog">&times;</button>
@@ -993,8 +1016,8 @@
             <!-- Populated dynamically -->
           </select>
         </div>
-        <button id="applyHistoryFiltersBtn" class="btn btn-primary">🔍 Apply Filters</button>
-        <button id="refreshHistoryBtn" class="btn btn-secondary">🔄 Refresh</button>
+        <button id="applyHistoryFiltersBtn" class="btn btn-primary">Apply Filters</button>
+        <button id="refreshHistoryBtn" class="btn btn-secondary">Refresh</button>
       </div>
       
       <!-- Sessions List -->
@@ -1009,7 +1032,7 @@
       </div>
     </div>
   </div>
-  <!-- 📊 Batch Close Report Modal -->
+  <!-- Batch Close Report Modal -->
   <div id="batchCloseModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="batchCloseTitle">
     <div class="modal-content modal-lg modal-scrollable">
       <button class="close" id="closeBatchCloseModalBtn" aria-label="Close dialog">&times;</button>
@@ -1048,18 +1071,18 @@
       </div>
 
       <div class="modal-footer">
-        <button id="viewBatchCloseHistoryBtn" class="btn btn-secondary">📜 View History</button>
-        <button id="printBatchCloseBtn" class="btn btn-secondary">🖨️ Print Report</button>
-        <button id="downloadBatchCloseCsvBtn" class="btn btn-secondary">⬇ Download CSV</button>
+        <button id="viewBatchCloseHistoryBtn" class="btn btn-secondary">View History</button>
+        <button id="printBatchCloseBtn" class="btn btn-secondary">Print Report</button>
+        <button id="downloadBatchCloseCsvBtn" class="btn btn-secondary">Download CSV</button>
         <button id="closeBatchCloseBtn" class="btn btn-ghost">Close</button>
       </div>
     </div>
   </div>
 
-  <!-- 🔒 Hidden printable invoice container -->
+  <!-- Hidden printable invoice container -->
   <div id="printableInvoiceContainer" style="display:none;"></div>
 
-  <!-- 📋 Audit Log Viewer Modal (Admin Security Dashboard) -->
+  <!-- Audit Log Viewer Modal (Admin Security Dashboard) -->
   <div id="auditLogModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="auditLogTitle">
     <div class="modal-content modal-lg modal-scrollable">
       <button class="close" id="closeAuditLogModalBtn" aria-label="Close dialog">&times;</button>
@@ -1128,8 +1151,8 @@
         </div>
       </div>
       <div style="display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap;">
-        <button id="searchAuditLogBtn" class="btn btn-primary">🔍 Search</button>
-        <button id="refreshAuditLogBtn" class="btn btn-secondary">↻ Refresh</button>
+        <button id="searchAuditLogBtn" class="btn btn-primary">Search</button>
+        <button id="refreshAuditLogBtn" class="btn btn-secondary">Refresh</button>
         <span id="auditLogStats" style="margin-left:auto; color:var(--text-muted); font-size:0.85rem; display:flex; align-items:center;"></span>
       </div>
 
@@ -1157,13 +1180,13 @@
       </div>
 
       <div class="modal-footer">
-        <button id="exportAuditLogBtn" class="btn btn-secondary">⬇ Export CSV</button>
+        <button id="exportAuditLogBtn" class="btn btn-secondary">Export CSV</button>
         <button id="closeAuditLogBtn" class="btn btn-ghost">Close</button>
       </div>
     </div>
   </div>
 
-  <!-- 🧾 Print Receipts Modal -->
+  <!-- Print Receipts Modal -->
   <div id="printReceiptsModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="printReceiptsTitle">
     <div class="modal-content modal-sm">
       <button class="close" id="closePrintReceiptsModalBtn" aria-label="Close dialog">&times;</button>
@@ -1202,13 +1225,13 @@
       </div>
       
       <div class="modal-footer">
-        <button id="generateReceiptsBtn" class="btn btn-primary">🖨 Generate</button>
+        <button id="generateReceiptsBtn" class="btn btn-primary">Generate</button>
         <button id="closePrintReceiptsBtn" class="btn btn-secondary">Cancel</button>
       </div>
     </div>
   </div>
 
-  <!-- 🏨 Room History Modal -->
+  <!-- Room History Modal -->
   <div id="roomHistoryModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="roomHistoryTitle">
     <div class="modal-content modal-scrollable" style="max-width:650px;">
       <button class="close" id="closeRoomHistoryBtn" aria-label="Close dialog">&times;</button>
@@ -1246,7 +1269,7 @@
     </div>
   </div>
 
-  <!-- 🔍 Search Customer Modal (Revamped) -->
+  <!-- Search Customer Modal (Revamped) -->
   <div id="searchCustomerModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="searchCustomerTitle">
     <div class="modal-content modal-scrollable" style="max-width:600px;">
       <button class="close" id="closeSearchCustomerBtn" aria-label="Close dialog">&times;</button>
@@ -1264,7 +1287,7 @@
     </div>
   </div>
 
-  <!-- 👤 Customer Details Modal (Revamped) -->
+  <!-- Customer Details Modal (Revamped) -->
   <div id="customerDetailsModal" class="modal" role="dialog" aria-modal="true" aria-label="Customer details">
     <div class="modal-content" style="max-width:500px;">
       <button class="close" id="closeCustomerDetailsBtn" aria-label="Close dialog">&times;</button>
@@ -1273,11 +1296,12 @@
         <button id="editCustomerBtn" class="btn btn-secondary"><span class="material-icons" style="font-size:16px; vertical-align:middle;">edit</span> Edit</button>
         <button id="viewCustomerTransactionsBtn" class="btn btn-secondary"><span class="material-icons" style="font-size:16px; vertical-align:middle;">receipt_long</span> Transactions</button>
         <button id="viewCustomerReservationsBtn" class="btn btn-secondary"><span class="material-icons" style="font-size:16px; vertical-align:middle;">calendar_month</span> Reservations</button>
+        <button id="deleteCustomerBtn" class="btn btn-danger"><span class="material-icons" style="font-size:16px; vertical-align:middle;">delete</span> Delete</button>
       </div>
     </div>
   </div>
 
-  <!-- 🧾 Transaction List Modal -->
+  <!-- Transaction List Modal -->
   <div id="transactionListModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="transactionListTitle">
     <div class="modal-content">
       <button class="close" id="closeTransactionListBtn" aria-label="Close dialog">&times;</button>
@@ -1286,7 +1310,7 @@
     </div>
   </div>
 
-  <!-- 📄 Receipt Detail Modal -->
+  <!-- Receipt Detail Modal -->
   <div id="receiptDetailModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="receiptDetailTitle">
     <div class="modal-content modal-scrollable">
       <button class="close" id="closeReceiptDetailBtn" aria-label="Close dialog">&times;</button>
@@ -1295,20 +1319,20 @@
     </div>
   </div>
 
-  <!-- 🔍 Search Receipt Modal -->
+  <!-- Search Receipt Modal -->
   <div id="searchReceiptModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="searchReceiptTitle">
     <div class="modal-content">
       <button class="close" id="closeSearchReceiptBtn" aria-label="Close dialog">&times;</button>
       <h2 id="searchReceiptTitle">Search Receipt</h2>
       <input type="text" id="searchReceiptInput" placeholder="Enter receipt number..." aria-label="Search by receipt number" maxlength="5" />
       <div class="modal-footer">
-        <button id="submitSearchReceiptBtn" class="btn btn-primary">🔎 Search</button>
+        <button id="submitSearchReceiptBtn" class="btn btn-primary">Search</button>
       </div>
       <div id="searchReceiptError" class="error-message"></div>
     </div>
   </div>
 
-  <!-- 🛎 Check-In/Out Filter Modal -->
+  <!-- Check-In/Out Filter Modal -->
   <div id="checkInOutFilterModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="checkInOutFilterTitle">
     <div class="modal-content">
       <button class="close" id="closeCheckInOutFilterBtn" aria-label="Close dialog">&times;</button>
@@ -1352,31 +1376,31 @@
     </div>
   </div>
 
-  <!-- 🖨️ Registration Form Prompt Modal -->
+  <!-- Registration Form Prompt Modal -->
   <div id="registrationPromptModal" class="modal" role="dialog" aria-modal="true" aria-label="Registration form prompt" style="z-index: 1800;">
     <div class="modal-content modal-sm">
       <button class="close" id="closeRegistrationPromptBtn" aria-label="Close dialog">&times;</button>
       <h3>Would you like to print the guest registration form?</h3>
       <div class="modal-footer">
-        <button id="continueToIdUploadBtn" class="btn btn-success">✅ Yes, Continue</button>
-        <button id="cancelRegistrationFlowBtn" class="btn btn-secondary">❌ Cancel</button>
+        <button id="continueToIdUploadBtn" class="btn btn-success">Yes, Continue</button>
+        <button id="cancelRegistrationFlowBtn" class="btn btn-secondary">Cancel</button>
       </div>
     </div>
   </div>
 
-  <!-- 🆔 ID Upload Modal -->
+  <!-- ID Upload Modal -->
   <div id="idUploadModal" class="modal" role="dialog" aria-modal="true" aria-label="Upload guest ID" style="z-index: 1900;">
     <div class="modal-content modal-sm">
       <button class="close" id="closeIdUploadBtn" aria-label="Close dialog">&times;</button>
       <h3>Please upload the guest's ID</h3>
       <input type="file" id="idUploadInput" accept="image/*" />
       <div class="modal-footer">
-        <button id="cancelIdUploadBtn" class="btn btn-secondary">❌ Cancel</button>
+        <button id="cancelIdUploadBtn" class="btn btn-secondary">Cancel</button>
       </div>
     </div>
   </div>
 
-  <!-- ✂️ ID Cropping Modal -->
+  <!-- ID Cropping Modal -->
   <div id="idCropModal" class="modal" role="dialog" aria-modal="true" aria-label="Crop guest ID image" style="z-index: 2000;">
     <div class="modal-content" style="max-height: 92vh; height: 92vh; margin: 3vh auto; display: flex; flex-direction: column; overflow: hidden; padding: 16px 24px;">
       <button class="close" id="closeIdCropBtn" aria-label="Close dialog">&times;</button>
@@ -1391,18 +1415,18 @@
     </div>
   </div>
 
-  <!-- 📋 Registration Form Preview Modal -->
+  <!-- Registration Form Preview Modal -->
   <div id="registrationFormPreviewModal" class="modal" role="dialog" aria-modal="true" aria-label="Registration form preview" style="z-index: 1800;">
     <div class="modal-content modal-print" id="formPreviewContent">
       <!-- Filled dynamically by JS -->
     </div>
     <div class="modal-footer">
-      <button id="printRegistrationFormBtn" class="btn btn-success">✅ Print Form</button>
-      <button id="cancelPreviewBtn" class="btn btn-secondary">❌ Cancel</button>
+      <button id="printRegistrationFormBtn" class="btn btn-success">Print Form</button>
+      <button id="cancelPreviewBtn" class="btn btn-secondary">Cancel</button>
     </div>
   </div>
 
-  <!-- 🏨 Check-In Confirmation Modal -->
+  <!-- Check-In Confirmation Modal -->
   <div id="checkInConfirmationModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="checkInConfirmTitle">
     <div class="modal-content modal-sm">
       <button class="close" id="closeCheckInConfirmationBtn" aria-label="Close dialog">&times;</button>
@@ -1410,26 +1434,26 @@
       <div id="checkInSummaryContent"></div>
       <p style="margin-top: 16px; color: var(--text-secondary);">Is this guest checking in <strong>right now</strong>?</p>
       <div class="modal-footer">
-        <button id="confirmCheckInNowBtn" class="btn btn-success">✅ Yes, Checking In Now</button>
-        <button id="skipCheckInBtn" class="btn btn-secondary">⏭️ No, Not Yet</button>
+        <button id="confirmCheckInNowBtn" class="btn btn-success">Yes, Checking In Now</button>
+        <button id="skipCheckInBtn" class="btn btn-secondary">No, Not Yet</button>
       </div>
     </div>
   </div>
 
-  <!-- 📱 SMS Confirmation Modal (Legacy - Hidden) -->
+  <!-- SMS Confirmation Modal (Legacy - Hidden) -->
   <div id="emailConfirmationModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="emailConfirmTitle" style="display:none !important;">
     <div class="modal-content modal-sm">
       <button class="close" id="closeEmailConfirmationBtn" aria-label="Close dialog">&times;</button>
       <h3 id="emailConfirmTitle">SMS Confirmation</h3>
       <div id="emailSummaryContent"></div>
       <div class="modal-footer">
-        <button id="sendEmailConfirmationBtn" class="btn btn-success">📱 Send SMS Confirmation</button>
-        <button id="cancelEmailConfirmationBtn" class="btn btn-secondary">❌ Cancel</button>
+        <button id="sendEmailConfirmationBtn" class="btn btn-success">Send SMS Confirmation</button>
+        <button id="cancelEmailConfirmationBtn" class="btn btn-secondary">Cancel</button>
       </div>
     </div>
   </div>
 
-  <!-- 📑 Customer Reservations Modal -->
+  <!-- Customer Reservations Modal -->
   <div id="customerReservationsModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="custReservationsTitle">
     <div class="modal-content">
       <button class="close" id="closeCustomerReservationsBtn" aria-label="Close dialog">&times;</button>

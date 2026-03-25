@@ -551,6 +551,75 @@ const DateUtils = {
 // Expose globally
 window.DateUtils = DateUtils;
 
+/**
+ * Sort comparator for payments: ascending by timestamp, then by receipt number as tiebreaker.
+ * Handles Firestore Timestamp objects, ISO strings, Date objects, and null/undefined.
+ */
+function comparePaymentsByTime(a, b) {
+  const tsA = DateUtils.normalizeTimestamp(a.timestamp);
+  const tsB = DateUtils.normalizeTimestamp(b.timestamp);
+  // Primary sort: by normalized timestamp (ISO string, lexicographically sortable)
+  if (tsA && tsB && tsA !== tsB) return tsA < tsB ? -1 : 1;
+  // Tiebreaker: by receipt number (ascending)
+  const rA = a.receiptNumber || '';
+  const rB = b.receiptNumber || '';
+  if (rA !== rB) return rA < rB ? -1 : 1;
+  return 0;
+}
+
+/**
+ * Calculate the net total of balance adjustments (discounts, charges).
+ */
+function calcAdjustmentTotal(adjustments) {
+  if (!adjustments || !adjustments.length) return 0;
+  return adjustments.reduce((sum, adj) => {
+    if (adj.type === 'daily_charge') return sum; // legacy — ignore
+    return sum + (adj.type === 'discount' ? -adj.amount : adj.amount);
+  }, 0);
+}
+
+/**
+ * Calculate total credits from reservation.balanceCredits array.
+ * Top-level so computeLivePaymentStatus can access it.
+ */
+function calcCreditTotal(credits) {
+  if (!credits || !credits.length) return 0;
+  return credits.reduce((sum, c) => sum + parseFloat(c.amount || 0), 0);
+}
+
+/**
+ * computeLivePaymentStatus — single source of truth for payment status.
+ *
+ * Always derives the status from the live payments cache instead of reading
+ * the `paymentStatus` field that may be stale (e.g. after a rate-changing
+ * extension that didn't update the field correctly).
+ *
+ * @param {Object} reservation
+ * @returns {'fully_paid'|'partially_paid'|'unpaid'}
+ */
+function computeLivePaymentStatus(reservation) {
+  if (!reservation) return 'unpaid';
+  try {
+    const start = new Date(reservation.arrivalDate);
+    const end   = new Date(reservation.departureDate);
+    const nights = Math.max(1, Math.ceil((end - start) / (1000 * 60 * 60 * 24)));
+    const rate     = parseFloat(reservation.rate) || 0;
+    const totalDue = rate * nights + calcAdjustmentTotal(reservation.balanceAdjustments);
+    const actualPaid = (window._allPaymentsCache || [])
+      .filter(p => p.reservationId === reservation.id && !p.voided)
+      .reduce((s, p) => s + parseFloat(p.amount || 0), 0);
+    const creditTotal = calcCreditTotal(reservation.balanceCredits);
+    const totalPaid = actualPaid + creditTotal;
+    if (totalDue <= 0) return totalPaid > 0 ? 'fully_paid' : 'unpaid';
+    if (totalPaid >= totalDue) return 'fully_paid';
+    if (totalPaid > 0) return 'partially_paid';
+    return 'unpaid';
+  } catch (err) {
+    console.warn('computeLivePaymentStatus error for reservation', reservation.id, err);
+    return reservation.paymentStatus || 'unpaid';
+  }
+}
+
 /* ╔═══════════════════════════════════════════════════════════════════════════════╗
    ║                    SECTION 3: MAIN APPLICATION INIT                           ║
    ╚═══════════════════════════════════════════════════════════════════════════════╝ */
@@ -1157,7 +1226,7 @@ Thanks!`;
         top: 0;
         left: 0;
         width: 100%;
-        background: linear-gradient(90deg, #ff6b6b, #ee5a6f);
+        background: #ef4444;
         color: white;
         padding: 16px 20px;
         text-align: center;
@@ -1294,11 +1363,11 @@ Thanks!`;
       } else if (data.loggedIn) {
         showSuccessMessage("✅ QuickBooks is already authorized!");
       } else {
-        alert("❌ Unable to retrieve QuickBooks authorization URL.");
+        alert("Unable to retrieve QuickBooks authorization URL.");
       }
     } catch (err) {
       console.error("Manual QB auth check failed:", err);
-      alert("❌ Failed to check QuickBooks status. Check console for details.");
+      alert("Failed to check QuickBooks status. Check console for details.");
     }
   });
 
@@ -1345,9 +1414,10 @@ Thanks!`;
   `;
   document.head.appendChild(style);
 
-  // Check QuickBooks login every 30 minutes (1800000ms)
-  setInterval(checkQuickBooksLogin, 1800000);
-  checkQuickBooksLogin(); // Initial check on app load
+  // QB auth check only runs when user explicitly clicks manual QB auth button.
+  // No auto-prompt — printing and other actions must never be blocked by QB status.
+  // setInterval(checkQuickBooksLogin, 1800000);
+  // checkQuickBooksLogin();
 // Wrap onSnapshot with error handler
 function safeOnSnapshot(ref, onNext) {
   try {
@@ -1376,7 +1446,7 @@ window.addEventListener('online', () => {
     offlineIndicator.style.display = 'none';
   }
   // Show a toast notification
-  showToast('✅ Back online! Changes will sync.', 'success');
+  showToast('Back online! Changes will sync.', 'success');
   // Retry any queued QB syncs (with duplicate checking)
   retryQuickBooksQueue();
 });
@@ -1398,7 +1468,7 @@ window.addEventListener('offline', () => {
       top: 0;
       left: 0;
       right: 0;
-      background: linear-gradient(135deg, #f97316, #ea580c);
+      background: #f97316;
       color: white;
       text-align: center;
       padding: 8px 16px;
@@ -1423,10 +1493,10 @@ if (!navigator.onLine) {
 function showToast(message, type = 'info') {
   const toast = document.createElement('div');
   const bgColors = {
-    success: 'linear-gradient(135deg, #10b981, #059669)',
-    error: 'linear-gradient(135deg, #ef4444, #dc2626)',
-    info: 'linear-gradient(135deg, #3b82f6, #2563eb)',
-    warning: 'linear-gradient(135deg, #f97316, #ea580c)'
+    success: '#10b981',
+    error: '#ef4444',
+    info: '#3b82f6',
+    warning: '#f97316'
   };
   toast.innerHTML = message;
   toast.style.cssText = `
@@ -1742,52 +1812,80 @@ function getQuickBooksQueue() {
 }
 
 function saveQuickBooksQueue(queue) {
-  localStorage.setItem(QB_QUEUE_KEY, JSON.stringify(queue));
+  // Deduplicate by receipt number before saving
+  const seen = new Set();
+  const deduped = queue.filter(item => {
+    if (!item || !item.receiptNumber) return true;
+    if (seen.has(item.receiptNumber)) return false;
+    seen.add(item.receiptNumber);
+    return true;
+  });
+  localStorage.setItem(QB_QUEUE_KEY, JSON.stringify(deduped));
 }
 
+let _qbQueueRetryInProgress = false;
+
 async function retryQuickBooksQueue() {
-  const queue = getQuickBooksQueue();
-  if (queue.length === 0) return;
+  if (_qbQueueRetryInProgress) return;
+  _qbQueueRetryInProgress = true;
 
-  Logger.debug(`Retrying ${queue.length} QuickBooks sync(s) from local queue...`);
-  let stillPending = [];
+  try {
+    const queue = getQuickBooksQueue();
+    if (queue.length === 0) return;
 
-  for (let item of queue) {
-    if (!item || !item.name || !item.amount) {
-      Logger.warn("Skipping invalid QuickBooks queue item:", item);
-      continue;
-    }
-    
-    // Check if this payment was already synced or voided (by receipt number)
-    if (item.receiptNumber) {
+    Logger.debug(`Retrying ${queue.length} QuickBooks sync(s) from local queue...`);
+    let stillPending = [];
+
+    for (let item of queue) {
+      if (!item || !item.name || !item.amount) {
+        Logger.warn("Skipping invalid QuickBooks queue item:", item);
+        continue;
+      }
+      
+      // Check Firestore to see if already synced or voided
+      if (item.paymentId) {
+        try {
+          const paymentDoc = await getDoc(doc(db, 'payments', item.paymentId));
+          if (paymentDoc.exists()) {
+            const data = paymentDoc.data();
+            if (data.qbSyncStatus === 'synced') {
+              Logger.debug(`Receipt #${item.receiptNumber} already synced - removing from queue`);
+              continue;
+            }
+            if (data.voided || data.qbSyncStatus === 'voided') {
+              Logger.debug(`Receipt #${item.receiptNumber} is voided - removing from queue`);
+              continue;
+            }
+          }
+        } catch (e) {
+          Logger.warn('Could not check sync status:', e);
+        }
+      }
+      
       try {
-        const paymentsSnapshot = await getDocs(
-          query(collection(db, 'payments'), where('receiptNumber', '==', item.receiptNumber))
-        );
-        const existingPayment = paymentsSnapshot.docs[0]?.data();
-        if (existingPayment?.qbSyncStatus === 'synced') {
-          Logger.debug(`Receipt #${item.receiptNumber} already synced - removing from queue`);
-          continue;
+        const result = await sendToQuickBooks(item);
+        Logger.debug("Synced to QuickBooks:", item.receiptNumber);
+        // Mark as synced in Firestore
+        if (item.paymentId) {
+          try {
+            await updateDoc(doc(db, 'payments', item.paymentId), {
+              qbSyncStatus: 'synced',
+              qbSyncedAt: new Date().toISOString(),
+              qbSyncError: null,
+              ...(result?.duplicate ? { qbSyncNote: 'Already existed in QuickBooks' } : {})
+            });
+          } catch (e) { Logger.warn('Could not update sync status:', e); }
         }
-        if (existingPayment?.voided || existingPayment?.qbSyncStatus === 'voided') {
-          Logger.debug(`Receipt #${item.receiptNumber} is voided - removing from queue`);
-          continue;
-        }
-      } catch (e) {
-        Logger.warn('Could not check sync status:', e);
+      } catch (err) {
+        Logger.warn("QuickBooks retry failed:", err.message);
+        stillPending.push(item);
       }
     }
-    
-    try {
-      await sendToQuickBooks(item);
-      Logger.debug("Synced to QuickBooks:", item.receiptNumber);
-    } catch (err) {
-      Logger.warn("QuickBooks retry failed:", err.message);
-      stillPending.push(item);
-    }
-  }
 
-  saveQuickBooksQueue(stillPending);
+    saveQuickBooksQueue(stillPending);
+  } finally {
+    _qbQueueRetryInProgress = false;
+  }
 }
 
 async function sendToQuickBooks(paymentData) {
@@ -1885,18 +1983,19 @@ async function pushToQuickBooks(paymentData, paymentId = null, skipDuplicateChec
 
   try {
     const result = await sendToQuickBooks(paymentData);
-    console.log("Payment successfully sent to QuickBooks.");
+    console.log("Payment successfully sent to QuickBooks.", result?.duplicate ? '(was already in QB)' : '');
     
     if (paymentId) {
       try {
         await updateDoc(doc(db, "payments", paymentId), {
           qbSyncStatus: 'synced',
           qbSyncedAt: new Date().toISOString(),
-          qbError: null
+          qbError: null,
+          ...(result?.duplicate ? { qbSyncNote: 'Already existed in QuickBooks' } : {})
         });
       } catch (e) { console.warn("Could not update QB status:", e); }
     }
-    return { success: true, result };
+    return { success: true, result, alreadyInQB: !!result?.duplicate };
     
   } catch (err) {
     console.warn("QuickBooks sync failed - queued for retry:", err);
@@ -1957,7 +2056,13 @@ window.addEventListener('online', retryQuickBooksQueue);
  * Retry failed QuickBooks syncs from Firestore
  * This allows any computer to retry syncs that failed on other computers
  */
+let _qbFirestoreRetryInProgress = false;
+
 async function retryFailedQBSyncsFromFirestore() {
+  // Prevent concurrent retries
+  if (_qbFirestoreRetryInProgress || _qbSyncInProgress) return;
+  _qbFirestoreRetryInProgress = true;
+
   try {
     const paymentsSnapshot = await getDocs(collection(db, "payments"));
     const failedPayments = paymentsSnapshot.docs
@@ -2002,24 +2107,39 @@ async function retryFailedQBSyncsFromFirestore() {
       }
       
       // Use stored qbPaymentData if available, otherwise construct from payment
+      // Ensure date is always the original payment creation date, not today
+      let paymentDateStr = new Date().toISOString().split('T')[0];
+      if (payment.timestamp) {
+        try {
+          if (typeof payment.timestamp.toDate === 'function') {
+            paymentDateStr = payment.timestamp.toDate().toISOString().split('T')[0];
+          } else if (typeof payment.timestamp === 'string') {
+            paymentDateStr = payment.timestamp.split('T')[0];
+          } else {
+            paymentDateStr = new Date(payment.timestamp).toISOString().split('T')[0];
+          }
+        } catch (e) { /* keep default */ }
+      }
+
       const paymentData = payment.qbPaymentData || {
         name: payment.customerName || 'Unknown',
         amount: payment.amount,
         receiptNumber: payment.receiptNumber,
-        date: payment.timestamp?.split('T')[0] || new Date().toISOString().split('T')[0],
+        date: paymentDateStr,
         method: payment.method
       };
       
       try {
-        await sendToQuickBooks(paymentData);
-        Logger.success(`Payment ${payment.receiptNumber} synced to QuickBooks`);
+        const result = await sendToQuickBooks(paymentData);
+        Logger.success(`Payment ${payment.receiptNumber} synced to QuickBooks${result?.duplicate ? ' (already existed)' : ''}`);
         
         // Update status to synced
         await updateDoc(doc(db, 'payments', payment.id), {
           qbSyncStatus: 'synced',
           qbSyncedAt: new Date().toISOString(),
           qbSyncError: null,
-          qbPaymentData: null // Clear stored data after successful sync
+          qbPaymentData: null,
+          ...(result?.duplicate ? { qbSyncNote: 'Already existed in QuickBooks' } : {})
         });
       } catch (err) {
         const errMsg = err.message || '';
@@ -2048,6 +2168,8 @@ async function retryFailedQBSyncsFromFirestore() {
     }
   } catch (err) {
     console.error("Error retrying QB syncs from Firestore:", err);
+  } finally {
+    _qbFirestoreRetryInProgress = false;
   }
 }
 
@@ -2082,10 +2204,13 @@ async function bulkResyncToQuickBooks(lastSentReceiptNumber = 0) {
     const allPayments = paymentsSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
     
     // Filter payments with receipt numbers > lastSentReceiptNumber that aren't synced
+    // Only include payments that have an explicit non-synced status (not old payments missing the field)
     const unsentPayments = allPayments.filter(p => {
       if (p.voided) return false;
+      if (p.qbSyncStatus === 'synced') return false;
+      if (!p.qbSyncStatus) return false; // Skip old payments without tracking
       const receiptNum = parseInt(p.receiptNumber?.replace(/\D/g, '') || '0', 10);
-      return receiptNum > lastSentReceiptNumber && p.qbSyncStatus !== 'synced';
+      return receiptNum > lastSentReceiptNumber;
     });
 
     if (unsentPayments.length === 0) {
@@ -2141,16 +2266,17 @@ async function bulkResyncToQuickBooks(lastSentReceiptNumber = 0) {
         const customer = customers.find(c => c.id === payment.customerId) || null;
         const qbData = buildQuickBooksPaymentData(payment, reservation, customer);
 
-        await sendToQuickBooks(qbData);
+        const result = await sendToQuickBooks(qbData);
 
         await updateDoc(doc(db, "payments", payment.id), {
           qbSyncStatus: 'synced',
           qbSyncedAt: new Date().toISOString(),
-          qbSyncError: null
+          qbSyncError: null,
+          ...(result?.duplicate ? { qbSyncNote: 'Already existed in QuickBooks' } : {})
         });
 
         successCount++;
-        results.push(`✅ ${payment.receiptNumber}`);
+        results.push(`✅ ${payment.receiptNumber}${result?.duplicate ? ' (already in QB)' : ''}`);
         console.log(`✅ Synced receipt ${payment.receiptNumber} to QuickBooks`);
 
       } catch (err) {
@@ -2202,7 +2328,7 @@ window.bulkResyncToQuickBooks = bulkResyncToQuickBooks;
  * This is a safer alternative to bulkResync - it only sends receipts that haven't been synced yet
  * Prevents duplicates by checking qbSyncStatus before sending
  */
-async function sendUnsentToQuickBooks() {
+async function sendUnsentToQuickBooks(startFromReceipt = 0) {
   // Prevent concurrent sync operations
   if (_qbSyncInProgress) {
     alert("A QuickBooks sync is already in progress. Please wait for it to finish.");
@@ -2215,15 +2341,25 @@ async function sendUnsentToQuickBooks() {
     const paymentsSnapshot = await getDocs(collection(db, "payments"));
     const allPayments = paymentsSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
     
-    // Filter to only unsent payments (not synced, not voided)
+    // Filter to only unsent payments (explicitly pending/failed, not voided)
+    // IMPORTANT: Skip payments with no qbSyncStatus at all — those are old payments
+    // created before sync tracking was added and were likely already sent to QB manually.
     const unsentPayments = allPayments.filter(p => {
       if (p.voided) return false;
       if (p.qbSyncStatus === 'synced') return false;
+      // Only include payments that have an explicit pending/failed/queued status
+      // Payments with no qbSyncStatus field are old and should NOT be re-sent
+      if (!p.qbSyncStatus) return false;
+      // If startFromReceipt is set, only include receipts >= that number
+      if (startFromReceipt > 0) {
+        const receiptNum = parseInt(p.receiptNumber?.replace(/\D/g, '') || '0', 10);
+        if (receiptNum < startFromReceipt) return false;
+      }
       return true;
     });
 
     if (unsentPayments.length === 0) {
-      showToast('✅ All receipts have been sent to QuickBooks', 'success');
+      showToast('All receipts have been sent to QuickBooks', 'success');
       return { success: true, sent: 0, message: 'All receipts already synced' };
     }
 
@@ -2269,12 +2405,13 @@ async function sendUnsentToQuickBooks() {
         const customer = customers.find(c => c.id === payment.customerId) || null;
         const qbData = buildQuickBooksPaymentData(payment, reservation, customer);
 
-        await sendToQuickBooks(qbData);
+        const result = await sendToQuickBooks(qbData);
 
         await updateDoc(doc(db, "payments", payment.id), {
           qbSyncStatus: 'synced',
           qbSyncedAt: new Date().toISOString(),
-          qbSyncError: null
+          qbSyncError: null,
+          ...(result?.duplicate ? { qbSyncNote: 'Already existed in QuickBooks' } : {})
         });
 
         successCount++;
@@ -2305,7 +2442,7 @@ async function sendUnsentToQuickBooks() {
 
     const message = `QuickBooks Sync Complete!\n\n✅ Sent: ${successCount}\n❌ Failed: ${failCount}\n⏭️ Skipped: ${skippedCount}`;
     alert(message);
-    showToast(`✅ ${successCount} receipts sent to QuickBooks`, 'success');
+    showToast(`${successCount} receipts sent to QuickBooks`, 'success');
 
     return { success: true, sent: successCount, failed: failCount, skipped: skippedCount };
 
@@ -2357,7 +2494,11 @@ if (cancelPaymentBtn) {
 // Defined at initializeApp scope so all handlers can access it
 // ─────────────────────────────────────────────────────────────────────────────
 async function afterReservationOrPaymentChange() {
-  await fillDashboard();
+  try {
+    await fillDashboard();
+  } catch (err) {
+    console.error("Dashboard refresh failed (data was saved successfully):", err);
+  }
 }
 
 // 🧾 Manage Payment Modal Logic (global)
@@ -2385,7 +2526,8 @@ async function openManagePaymentModal(reservation) {
 
   // Fetch all payments for this reservation from cache (live-updated by onSnapshot)
   const allPayments = (window._allPaymentsCache || [])
-    .filter(p => p.reservationId === reservation.id);
+    .filter(p => p.reservationId === reservation.id)
+    .sort(comparePaymentsByTime);
   
   // Active payments exclude voided ones (for calculations)
   const activePayments = allPayments.filter(p => !p.voided);
@@ -2396,19 +2538,80 @@ async function openManagePaymentModal(reservation) {
   
   // Calculate adjustments (discounts and additional charges stored on reservation)
   const adjustments = reservation.balanceAdjustments || [];
-  const totalAdjustment = adjustments.reduce((sum, adj) => {
-    return sum + (adj.type === 'discount' ? -adj.amount : adj.amount);
-  }, 0);
+  const totalAdjustment = calcAdjustmentTotal(adjustments);
+  
+  // Calculate credits (stored on reservation, count toward paid without using receipts)
+  const balanceCredits = reservation.balanceCredits || [];
+  const totalCredits = calcCreditTotal(balanceCredits);
   
   const total = baseTotal + totalAdjustment;
-  const totalPaid = activePayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+  const actualPaid = activePayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+  const totalPaid = actualPaid + totalCredits;
   const balance = (total - totalPaid);
+
+  // ── AUTO-HEAL paymentStatus ─────────────────────────────────────────────
+  // The stored paymentStatus may be stale (e.g. rate was changed during an
+  // extension before a previous bug-fix, leaving the field out of sync).
+  // Recalculate the correct status here and silently fix it if it differs.
+  {
+    const correctStatus = totalPaid >= total
+      ? 'fully_paid'
+      : totalPaid > 0
+        ? 'partially_paid'
+        : 'unpaid';
+    if (reservation.paymentStatus !== correctStatus) {
+      console.log(`🔧 Auto-correcting paymentStatus for reservation ${reservation.id}: "${reservation.paymentStatus}" → "${correctStatus}"`);
+      updateDoc(doc(db, "reservations", reservation.id), { paymentStatus: correctStatus })
+        .catch(err => console.warn("Could not auto-correct paymentStatus:", err));
+      reservation.paymentStatus = correctStatus;
+    }
+  }
+
+  // Helper: recalculate balance from fresh cache (avoids stale closure values)
+  const getFreshBalance = () => {
+    const freshPayments = (window._allPaymentsCache || [])
+      .filter(p => p.reservationId === reservation.id && !p.voided);
+    const freshActualPaid = freshPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+    const freshTotalPaid = freshActualPaid + totalCredits;
+    return { totalCost: total, totalPaid: freshTotalPaid, balance: Math.max(0, total - freshTotalPaid) };
+  };
 
   // Fill summary
   document.getElementById("totalPaid").textContent = totalPaid.toFixed(2);
   document.getElementById("balanceRemaining").textContent = Math.max(0, balance).toFixed(2);
   if (document.getElementById("totalDue")) {
     document.getElementById("totalDue").textContent = total.toFixed(2);
+  }
+
+  // Show nights count
+  const nightsDisplayEl = document.getElementById("nightsDisplay");
+  if (nightsDisplayEl) {
+    nightsDisplayEl.textContent = `(${nights} night${nights !== 1 ? 's' : ''} × $${rate.toFixed(2)}/night)`;
+  }
+
+  // Show overdue tag if departure passed and balance > 0
+  const overdueTagEl = document.getElementById("overdueTag");
+  if (overdueTagEl) {
+    const todayStr = getTodayLocal();
+    const isOverdue = reservation.departureDate < todayStr && balance > 0;
+    overdueTagEl.style.display = isOverdue ? "inline" : "none";
+    if (isOverdue) {
+      const daysOverdue = Math.ceil((new Date(todayStr) - new Date(reservation.departureDate)) / (1000 * 60 * 60 * 24));
+      overdueTagEl.textContent = `OVERDUE ${daysOverdue} DAY${daysOverdue !== 1 ? 'S' : ''}`;
+    }
+  }
+
+  // Show credits subtotal (from reservation.balanceCredits, NOT from payments)
+  const creditsTotal = balanceCredits.reduce((sum, c) => sum + parseFloat(c.amount || 0), 0);
+  const creditsSubtotalEl = document.getElementById("creditsSubtotal");
+  const creditsAmountEl = document.getElementById("creditsAmount");
+  if (creditsSubtotalEl && creditsAmountEl) {
+    if (creditsTotal > 0) {
+      creditsSubtotalEl.style.display = "inline";
+      creditsAmountEl.textContent = creditsTotal.toFixed(2);
+    } else {
+      creditsSubtotalEl.style.display = "none";
+    }
   }
   
   // Show adjustment total if any
@@ -2457,6 +2660,68 @@ async function openManagePaymentModal(reservation) {
       setupAdminBalanceAdjustment(reservation, baseTotal, totalPaid);
     }
   }
+
+  // Show admin credit section for admins
+  const adminCreditSection = document.getElementById("adminCreditSection");
+  if (adminCreditSection) {
+    adminCreditSection.style.display = isAdmin ? "block" : "none";
+    if (isAdmin) {
+      // Show credit history with remove buttons
+      const creditHistoryEl = document.getElementById("creditHistory");
+      if (creditHistoryEl && balanceCredits.length > 0) {
+        creditHistoryEl.innerHTML = "<strong>Credit History:</strong><br>" + balanceCredits.map((cr, idx) => {
+          const dateStr = cr.timestamp ? formatDateTimeDMY(cr.timestamp) : 'N/A';
+          return `<div style="padding:4px 0;border-bottom:1px solid var(--border-light);">
+            <span style="color:var(--accent-primary);font-weight:600;">$${parseFloat(cr.amount).toFixed(2)}</span> - ${escapeHTML(cr.reason)}
+            ${cr.showOnForm ? '<span style="font-size:0.7em;color:var(--accent-success);margin-left:4px;">[on form]</span>' : ''}
+            <span style="color:var(--text-muted);font-size:0.8em;"> (${cr.appliedBy || 'Admin'} on ${dateStr})</span>
+            <button class="remove-credit-btn" data-index="${idx}" style="background:#ef4444;color:#fff;border:none;padding:2px 6px;border-radius:4px;cursor:pointer;font-size:0.75em;margin-left:8px;">✕</button>
+          </div>`;
+        }).join('');
+
+        // Handle remove credit buttons
+        creditHistoryEl.querySelectorAll('.remove-credit-btn').forEach(btn => {
+          btn.addEventListener('click', async () => {
+            const index = parseInt(btn.dataset.index);
+            if (!confirm(`Remove this credit of $${parseFloat(balanceCredits[index].amount).toFixed(2)}?`)) return;
+            try {
+              const reservationRef = doc(db, "reservations", reservation.id);
+              const updatedCredits = [...balanceCredits];
+              updatedCredits.splice(index, 1);
+              await updateDoc(reservationRef, { balanceCredits: updatedCredits });
+
+              // Recalculate paymentStatus
+              const rmNights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate);
+              const rmBaseTotal = (parseFloat(reservation.rate) || 0) * rmNights;
+              const rmTotal = rmBaseTotal + calcAdjustmentTotal(reservation.balanceAdjustments || []);
+              const rmActualPaid = (window._allPaymentsCache || [])
+                .filter(p => p.reservationId === reservation.id && !p.voided)
+                .reduce((s, p) => s + parseFloat(p.amount || 0), 0);
+              const rmCreditTotal = calcCreditTotal(updatedCredits);
+              const rmTotalPaid = rmActualPaid + rmCreditTotal;
+              const rmStatus = rmTotalPaid >= rmTotal ? 'fully_paid' : rmTotalPaid > 0 ? 'partially_paid' : 'unpaid';
+              await updateDoc(reservationRef, { paymentStatus: rmStatus });
+
+              if (window._reservationsCache) {
+                const ci = window._reservationsCache.findIndex(r => r.id === reservation.id);
+                if (ci !== -1) window._reservationsCache[ci] = { ...window._reservationsCache[ci], balanceCredits: updatedCredits };
+              }
+
+              await openManagePaymentModal({ ...reservation, balanceCredits: updatedCredits });
+              await afterReservationOrPaymentChange();
+            } catch (err) {
+              console.error("Error removing credit:", err);
+              alert("Failed to remove credit.");
+            }
+          });
+        });
+      } else if (creditHistoryEl) {
+        creditHistoryEl.innerHTML = "<em style='color:var(--text-muted);'>No credits applied.</em>";
+      }
+
+      setupAdminCredit(reservation);
+    }
+  }
   
   allPayments.forEach(p => {
     const div = document.createElement("div");
@@ -2467,11 +2732,11 @@ async function openManagePaymentModal(reservation) {
     // QB sync status indicator
     let qbStatus = '';
     if (p.qbSyncStatus === 'synced') {
-      qbStatus = '<span style="color:#22c55e;font-size:0.75em;margin-left:8px;" title="Synced to QuickBooks">✓ QB</span>';
+      qbStatus = '<span style="color:#22c55e;font-size:0.75em;margin-left:8px;" title="Synced to QuickBooks">QB</span>';
     } else if (p.qbSyncStatus === 'failed') {
-      qbStatus = '<span style="color:#ef4444;font-size:0.75em;margin-left:8px;" title="Failed to sync to QuickBooks">✗ QB</span>';
+      qbStatus = '<span style="color:#ef4444;font-size:0.75em;margin-left:8px;" title="Failed to sync to QuickBooks">QB</span>';
     } else if (p.qbSyncStatus === 'queued') {
-      qbStatus = '<span style="color:#f59e0b;font-size:0.75em;margin-left:8px;" title="Queued for QuickBooks sync">⏳ QB</span>';
+      qbStatus = '<span style="color:#f59e0b;font-size:0.75em;margin-left:8px;" title="Queued for QuickBooks sync">QB</span>';
     }
     
     if (isVoided) {
@@ -2486,18 +2751,18 @@ async function openManagePaymentModal(reservation) {
       `;
     } else {
       // Active receipt with Edit, Void (admin only), Print buttons, and QB status/push for admin
-      const qbButton = isAdmin ? `<button class="qb-push-btn" data-id="${p.id}" style="background:#7c3aed;color:#fff;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:0.8em;" title="Push to QuickBooks">📤 QB</button>` : '';
+      const qbButton = isAdmin ? `<button class="qb-push-btn" data-id="${p.id}" style="background:#7c3aed;color:#fff;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:0.8em;" title="Push to QuickBooks">QB</button>` : '';
       const voidButton = isAdmin ? `<button class="void-payment-btn" data-id="${p.id}" data-receipt="${p.receiptNumber}" style="background:#f59e0b;color:#fff;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:0.8em;">Void</button>` : '';
       
       div.innerHTML = `
         <div><strong>Receipt:</strong> ${escapeHTML(p.receiptNumber)}${qbStatus}</div>
         <div><strong>Amount:</strong> $${parseFloat(p.amount).toFixed(2)}</div>
         <div><strong>Method:</strong> ${escapeHTML(methodDisplay)}</div>
-        <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;">
+        <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;align-items:center;">
+          <button class="print-receipt-btn" data-id="${p.id}" data-receipt="${p.receiptNumber}" data-amount="${p.amount}" data-method="${methodDisplay}" data-date="${p.timestamp ? formatDateDMY(p.timestamp.toDate ? p.timestamp.toDate() : p.timestamp) : 'N/A'}" style="background:#4caf50;color:#fff;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:0.8em;">Print</button>
           <button class="edit-payment-btn" data-id="${p.id}" style="background:#2196f3;color:#fff;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:0.8em;">Edit</button>
           ${voidButton}
-          <button class="print-receipt-btn" data-id="${p.id}" data-receipt="${p.receiptNumber}" data-amount="${p.amount}" data-method="${methodDisplay}" data-date="${p.timestamp ? formatDateDMY(p.timestamp.toDate ? p.timestamp.toDate() : p.timestamp) : 'N/A'}" style="background:#4caf50;color:#fff;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:0.8em;">Print</button>
-          ${qbButton}
+          ${qbButton ? `<span style="margin-left:auto;">${qbButton}</span>` : ''}
         </div>
       `;
     }
@@ -2674,9 +2939,7 @@ if (summaryBtn) {
             const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate);
             const baseTotal = (parseFloat(reservation.rate) || 0) * nights;
             const adjustments = reservation.balanceAdjustments || [];
-            const totalAdjustment = adjustments.reduce((sum, adj) => {
-              return sum + (adj.type === 'discount' ? -adj.amount : adj.amount);
-            }, 0);
+            const totalAdjustment = calcAdjustmentTotal(adjustments);
             const totalDue = baseTotal + totalAdjustment;
             
             // Determine new payment status
@@ -2757,9 +3020,7 @@ if (summaryBtn) {
         const baseTotal = (parseFloat(reservation.rate) || 0) * nights;
         // Include balance adjustments
         const adjustments = reservation.balanceAdjustments || [];
-        const totalAdjustment = adjustments.reduce((sum, adj) => {
-          return sum + (adj.type === 'discount' ? -adj.amount : adj.amount);
-        }, 0);
+        const totalAdjustment = calcAdjustmentTotal(adjustments);
         const totalDue = baseTotal + totalAdjustment;
         let newStatus = "not_paid";
         if (totalPaidAfterVoid >= totalDue) {
@@ -2846,9 +3107,7 @@ if (summaryBtn) {
         const baseTotal = (parseFloat(reservation.rate) || 0) * nights;
         // Include balance adjustments
         const adjustments = reservation.balanceAdjustments || [];
-        const totalAdjustment = adjustments.reduce((sum, adj) => {
-          return sum + (adj.type === 'discount' ? -adj.amount : adj.amount);
-        }, 0);
+        const totalAdjustment = calcAdjustmentTotal(adjustments);
         const totalDue = baseTotal + totalAdjustment;
         
         let newStatus = "not_paid";
@@ -2902,15 +3161,19 @@ if (summaryBtn) {
       const method = btn.getAttribute("data-method");
       const date = btn.getAttribute("data-date");
       
+      const freshBal = getFreshBalance();
       printSingleReceipt({
         receiptNumber,
         amount,
         method,
         date,
         customerName: customer?.name || 'Guest',
-        room: reservation?.room || 'N/A',
-        arrivalDate: reservation?.arrivalDate ? formatDateDMY(reservation.arrivalDate) : 'N/A',
-        departureDate: reservation?.departureDate ? formatDateDMY(reservation.departureDate) : 'N/A'
+        room: reservation?.roomNumber || 'N/A',
+        arrivalDate: reservation?.arrivalDate || 'N/A',
+        departureDate: reservation?.departureDate || 'N/A',
+        totalCost: freshBal.totalCost.toFixed(2),
+        totalPaid: freshBal.totalPaid.toFixed(2),
+        balance: freshBal.balance.toFixed(2)
       });
     });
   });
@@ -2923,24 +3186,24 @@ if (summaryBtn) {
       // Disable button and show loading state
       btn.disabled = true;
       const originalText = btn.innerHTML;
-      btn.innerHTML = '⏳...';
+      btn.innerHTML = '...';
       
       try {
         const result = await manualPushToQuickBooks(paymentId);
         
         if (result.success) {
-          alert("✅ Payment successfully pushed to QuickBooks!");
+          alert("Payment successfully pushed to QuickBooks!");
         } else if (result.queued) {
-          alert("⏳ Offline - payment queued for sync when back online.");
+          alert("Offline - payment queued for sync when back online.");
         } else {
-          alert("❌ Failed to push to QuickBooks: " + (result.error || 'Unknown error'));
+          alert("Failed to push to QuickBooks: " + (result.error || 'Unknown error'));
         }
         
         // Refresh modal to show updated status
         openManagePaymentModal(reservation);
       } catch (err) {
         console.error("QB push error:", err);
-        alert("❌ Error pushing to QuickBooks: " + err.message);
+        alert("Error pushing to QuickBooks: " + err.message);
         btn.disabled = false;
         btn.innerHTML = originalText;
       }
@@ -2978,6 +3241,7 @@ if (summaryBtn) {
         return;
       }
 
+      const freshBal = getFreshBalance();
       const templateParams = {
         customer_name: customer.name || '',
         customer_email: customer.email || '',
@@ -2987,8 +3251,8 @@ if (summaryBtn) {
         checkout: formatDateDMY(reservation.departureDate),
         room: reservation.roomNumber || '',
         amount_paid: parseFloat(payment.amount).toFixed(2),
-        balance: Math.max(0, total - totalPaid).toFixed(2),
-        total_amount: total.toFixed(2),
+        balance: freshBal.balance.toFixed(2),
+        total_amount: freshBal.totalCost.toFixed(2),
         receipt_number: payment.receiptNumber,
         special_offer: 'None',
         notes: reservation.note && reservation.note.trim() !== '' 
@@ -3003,7 +3267,7 @@ if (summaryBtn) {
           checkIn: formatDateDMY(reservation.arrivalDate),
           checkOut: formatDateDMY(reservation.departureDate),
           amountPaid: parseFloat(payment.amount).toFixed(2),
-          balance: Math.max(0, total - totalPaid).toFixed(2)
+          balance: freshBal.balance.toFixed(2)
         });
         await sendSMS(customer.telephone, smsMessage);
         alert("Receipt SMS sent successfully.");
@@ -3055,27 +3319,26 @@ if (summaryBtn) {
         confirmBtn.textContent = originalText;
         return;
       }
-      const selectedPayments = payments.filter(p => selectedReceipts.includes(p.receiptNumber));
+      const selectedPayments = activePayments.filter(p => selectedReceipts.includes(p.receiptNumber));
       const totalPaidSelected = selectedPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-      const balanceRemaining = Math.max(0, total - totalPaid);
+      const freshBal = getFreshBalance();
+      const balanceRemaining = freshBal.balance;
       
-      // Generate clean receipt HTML matching popup style
-      let receiptsHTML = selectedPayments.map(p => {
+      // Generate compact receipt rows for table layout
+      let receiptsRows = selectedPayments.map(p => {
         const normalizedTs = normalizeTimestamp(p.timestamp);
         const paymentDate = normalizedTs ? formatDateDMY(normalizedTs) : 'N/A';
         const paymentTime = normalizedTs ? new Date(normalizedTs).toLocaleTimeString() : 'N/A';
         const paymentMethod = p.method ? p.method.charAt(0).toUpperCase() + p.method.slice(1) : 'N/A';
         
         return `
-          <div style="background:#f5f5f5;padding:16px;border-radius:8px;margin-bottom:16px;page-break-inside:avoid;">
-            <h3 style="margin:0 0 12px 0;font-size:1.1em;">Receipt #${p.receiptNumber}</h3>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-              <div><strong>Date:</strong></div><div>${paymentDate}</div>
-              <div><strong>Time:</strong></div><div>${paymentTime}</div>
-              <div><strong>Amount:</strong></div><div style="color:#10b981;font-weight:600;">$${parseFloat(p.amount).toFixed(2)}</div>
-              <div><strong>Method:</strong></div><div>${paymentMethod}</div>
-            </div>
-          </div>
+          <tr>
+            <td>${p.receiptNumber}</td>
+            <td>${paymentDate}</td>
+            <td>${paymentTime}</td>
+            <td style="font-weight:600;color:#10b981;">$${parseFloat(p.amount).toFixed(2)}</td>
+            <td>${paymentMethod}</td>
+          </tr>
         `;
       }).join('');
       
@@ -3085,41 +3348,66 @@ if (summaryBtn) {
         <head>
           <title>Receipt - ${escapeHTML(customer.name || 'Guest')}</title>
           <style>
-            body { font-family: Arial, sans-serif; padding: 20px; color: #222; }
-            h2 { text-align: center; margin-bottom: 16px; }
+            @page { size: letter portrait; margin: 0.3in; }
+            body { font-family: Arial, sans-serif; padding: 8px 12px; color: #222; font-size: 11px; margin: 0; }
+            h2 { text-align: center; margin: 0 0 6px 0; font-size: 14px; }
+            h3 { margin: 0 0 4px 0; font-size: 11px; }
+            .info-row { display: flex; gap: 24px; margin-bottom: 6px; }
+            .info-block { flex: 1; background: #f5f5f5; padding: 6px 8px; border-radius: 4px; }
+            .info-block table { width: 100%; border-collapse: collapse; }
+            .info-block td { padding: 1px 4px; vertical-align: top; }
+            .info-block td:first-child { font-weight: 600; white-space: nowrap; width: 70px; }
+            .receipts-table { width: 100%; border-collapse: collapse; margin-top: 4px; }
+            .receipts-table th { background: #e5e7eb; padding: 3px 6px; text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 0.03em; border-bottom: 1px solid #ccc; }
+            .receipts-table td { padding: 3px 6px; border-bottom: 1px solid #eee; }
+            .receipts-table tr:nth-child(even) { background: #f9fafb; }
+            .footer { text-align: center; margin-top: 8px; color: #666; font-size: 9px; }
           </style>
         </head>
         <body>
-          <h2>🧾 Receipt Details</h2>
+          <h2>Receipt Details</h2>
           
-          <div style="background:#f5f5f5;padding:16px;border-radius:8px;margin-bottom:16px;">
-            <h3 style="margin:0 0 12px 0;font-size:1.1em;">👤 Customer</h3>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-              <div><strong>Name:</strong></div><div>${escapeHTML(customer.name || 'Unknown')}</div>
-              <div><strong>Phone:</strong></div><div>${escapeHTML(customer.telephone || 'N/A')}</div>
-              <div><strong>Email:</strong></div><div>${escapeHTML(customer.email || 'N/A')}</div>
-              <div><strong>Address:</strong></div><div>${escapeHTML(customer.address || 'N/A')}</div>
+          <div class="info-row">
+            <div class="info-block">
+              <h3>Customer</h3>
+              <table>
+                <tr><td>Name:</td><td>${escapeHTML(customer.name || 'Unknown')}</td></tr>
+                <tr><td>Phone:</td><td>${escapeHTML(customer.telephone || 'N/A')}</td></tr>
+                <tr><td>Email:</td><td>${escapeHTML(customer.email || 'N/A')}</td></tr>
+                <tr><td>Address:</td><td>${escapeHTML(customer.address || 'N/A')}</td></tr>
+              </table>
+            </div>
+            <div class="info-block">
+              <h3>Reservation</h3>
+              <table>
+                <tr><td>Room:</td><td>${reservation.roomNumber}</td></tr>
+                <tr><td>Check-In:</td><td>${formatDateDMY(reservation.arrivalDate)}</td></tr>
+                <tr><td>Check-Out:</td><td>${formatDateDMY(reservation.departureDate)}</td></tr>
+                <tr><td>Total Cost:</td><td>$${freshBal.totalCost.toFixed(2)}</td></tr>
+                <tr><td>Total Paid:</td><td style="color:#10b981;">$${freshBal.totalPaid.toFixed(2)}</td></tr>
+                <tr><td>Balance:</td><td style="color:${balanceRemaining > 0 ? '#ef4444' : '#10b981'};">$${balanceRemaining.toFixed(2)}</td></tr>
+              </table>
             </div>
           </div>
           
-          <div style="background:#f5f5f5;padding:16px;border-radius:8px;margin-bottom:16px;">
-            <h3 style="margin:0 0 12px 0;font-size:1.1em;">🏨 Reservation</h3>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-              <div><strong>Room:</strong></div><div>${reservation.roomNumber}</div>
-              <div><strong>Check-In:</strong></div><div>${formatDateDMY(reservation.arrivalDate)}</div>
-              <div><strong>Check-Out:</strong></div><div>${formatDateDMY(reservation.departureDate)}</div>
-              <div><strong>Total Due:</strong></div><div>$${total.toFixed(2)}</div>
-              <div><strong>Total Paid:</strong></div><div style="color:#10b981;">$${totalPaid.toFixed(2)}</div>
-              <div><strong>Balance:</strong></div><div style="color:${balanceRemaining > 0 ? '#ef4444' : '#10b981'};">$${balanceRemaining.toFixed(2)}</div>
-            </div>
-          </div>
+          <h3>Selected Receipts (${selectedPayments.length})</h3>
+          <table class="receipts-table">
+            <thead>
+              <tr><th>#</th><th>Date</th><th>Time</th><th>Amount</th><th>Method</th></tr>
+            </thead>
+            <tbody>
+              ${receiptsRows}
+            </tbody>
+            <tfoot>
+              <tr style="font-weight:700;border-top:2px solid #333;">
+                <td colspan="3" style="text-align:right;padding:4px 6px;">Selected Total:</td>
+                <td style="color:#10b981;padding:4px 6px;">$${totalPaidSelected.toFixed(2)}</td>
+                <td></td>
+              </tr>
+            </tfoot>
+          </table>
           
-          <h3 style="margin:16px 0 12px 0;">📋 Selected Receipts</h3>
-          ${receiptsHTML}
-          
-          <p style="text-align:center;margin-top:20px;color:#666;font-size:12px;">
-            Printed: ${formatDateTimeDMY(new Date())}
-          </p>
+          <p class="footer">Printed: ${formatDateTimeDMY(new Date())}</p>
         </body>
         </html>
       `;
@@ -3205,9 +3493,7 @@ if (summaryBtn) {
         const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate);
         const baseTotal = (parseFloat(reservation.rate) || 0) * nights;
         const adjustments = reservation.balanceAdjustments || [];
-        const totalAdjustment = adjustments.reduce((sum, adj) => {
-          return sum + (adj.type === 'discount' ? -adj.amount : adj.amount);
-        }, 0);
+        const totalAdjustment = calcAdjustmentTotal(adjustments);
         const total = baseTotal + totalAdjustment;
         
         // Calculate total paid from cache (new payment not in cache yet, so add manually)
@@ -3255,7 +3541,7 @@ if (summaryBtn) {
       document.getElementById("paymentMethodInput").value = "";
       
       // Show success and close modal, return to edit popup
-      alert(`✅ Payment saved! Receipt #${receipt}`);
+      alert(`Payment saved! Receipt #${receipt}`);
       document.getElementById("managePaymentModal").style.display = "none";
       
       // Refresh dashboard after successful payment
@@ -3352,6 +3638,18 @@ function setupAdminBalanceAdjustment(reservation, baseTotal, totalPaid) {
       await updateDoc(reservationRef, {
         balanceAdjustments: updatedAdjustments
       });
+
+      // Recalculate paymentStatus after adjustment changes the total due
+      {
+        const adjNights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate);
+        const adjBaseTotal = (parseFloat(reservation.rate) || 0) * adjNights;
+        const adjTotal = adjBaseTotal + calcAdjustmentTotal(updatedAdjustments);
+        const adjPaid = (window._allPaymentsCache || [])
+          .filter(p => p.reservationId === reservation.id && !p.voided)
+          .reduce((s, p) => s + parseFloat(p.amount || 0), 0);
+        const adjStatus = adjPaid >= adjTotal ? 'fully_paid' : adjPaid > 0 ? 'partially_paid' : 'unpaid';
+        await updateDoc(reservationRef, { paymentStatus: adjStatus });
+      }
       
       // Audit log for adjustment
       await auditLog(AUDIT_ACTIONS.BALANCE_ADJUSTMENT || 'BALANCE_ADJUSTMENT', {
@@ -3364,7 +3662,7 @@ function setupAdminBalanceAdjustment(reservation, baseTotal, totalPaid) {
         newTotal: updatedAdjustments.length
       }, 'reservation', reservation.id);
       
-      alert(`✅ ${type === 'discount' ? 'Discount' : 'Additional charge'} of $${amount.toFixed(2)} applied successfully.`);
+      alert(`${type === 'discount' ? 'Discount' : 'Additional charge'} of $${amount.toFixed(2)} applied successfully.`);
       
       // Clear form
       adjustmentAmountEl.value = "";
@@ -3387,7 +3685,7 @@ function setupAdminBalanceAdjustment(reservation, baseTotal, totalPaid) {
       
     } catch (err) {
       console.error("Error applying adjustment:", err);
-      alert("❌ Failed to apply adjustment. Please try again.");
+      alert("Failed to apply adjustment. Please try again.");
     }
   });
   
@@ -3410,6 +3708,18 @@ function setupAdminBalanceAdjustment(reservation, baseTotal, totalPaid) {
         await updateDoc(reservationRef, {
           balanceAdjustments: updatedAdjustments
         });
+
+        // Recalculate paymentStatus after adjustment removal changes the total due
+        {
+          const adjNights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate);
+          const adjBaseTotal = (parseFloat(reservation.rate) || 0) * adjNights;
+          const adjTotal = adjBaseTotal + calcAdjustmentTotal(updatedAdjustments);
+          const adjPaid = (window._allPaymentsCache || [])
+            .filter(p => p.reservationId === reservation.id && !p.voided)
+            .reduce((s, p) => s + parseFloat(p.amount || 0), 0);
+          const adjStatus = adjPaid >= adjTotal ? 'fully_paid' : adjPaid > 0 ? 'partially_paid' : 'unpaid';
+          await updateDoc(reservationRef, { paymentStatus: adjStatus });
+        }
         
         // Audit log for removal
         await auditLog(AUDIT_ACTIONS.BALANCE_ADJUSTMENT_REMOVE || 'BALANCE_ADJUSTMENT_REMOVE', {
@@ -3420,7 +3730,7 @@ function setupAdminBalanceAdjustment(reservation, baseTotal, totalPaid) {
           removedReason: adjustment.reason
         }, 'reservation', reservation.id);
         
-        alert("✅ Adjustment removed successfully.");
+        alert("Adjustment removed successfully.");
         
         // Refresh modal
         const updatedRes = { ...reservation, balanceAdjustments: updatedAdjustments };
@@ -3439,12 +3749,124 @@ function setupAdminBalanceAdjustment(reservation, baseTotal, totalPaid) {
         
       } catch (err) {
         console.error("Error removing adjustment:", err);
-        alert("❌ Failed to remove adjustment. Please try again.");
+        alert("Failed to remove adjustment. Please try again.");
       }
     });
   });
 }
 
+
+/**
+ * setupAdminCredit — Allows admins to apply credits/deductions that count
+ * toward Total Paid (unlike adjustments which modify Total Cost).
+ * Stores credits on reservation.balanceCredits (no receipts generated).
+ */
+function setupAdminCredit(reservation) {
+  const applyBtn = document.getElementById("applyCreditBtn");
+  const creditAmountEl = document.getElementById("creditAmount");
+  const creditReasonEl = document.getElementById("creditReason");
+  const showOnFormEl = document.getElementById("creditShowOnForm");
+
+  if (!applyBtn || !creditAmountEl || !creditReasonEl) {
+    console.warn("setupAdminCredit: Missing DOM elements");
+    return;
+  }
+
+  // Clone to remove old listeners
+  const newBtn = applyBtn.cloneNode(true);
+  applyBtn.parentNode.replaceChild(newBtn, applyBtn);
+
+  newBtn.addEventListener("click", async () => {
+    const amount = parseFloat(creditAmountEl.value);
+    const reason = creditReasonEl.value.trim();
+    const showOnForm = showOnFormEl ? showOnFormEl.checked : true;
+
+    if (!amount || amount <= 0) {
+      alert("Please enter a valid credit amount.");
+      return;
+    }
+    if (!reason) {
+      alert("Please enter a reason for the credit.");
+      return;
+    }
+
+    if (!confirm(`Apply credit of $${amount.toFixed(2)} to this reservation?\n\nReason: ${reason}\nShow on form: ${showOnForm ? 'Yes' : 'No'}\n\nThis will count toward Total Paid without using a receipt number.`)) {
+      return;
+    }
+
+    try {
+      const creditEmployee = getCurrentEmployeeInfo();
+      const reservationRef = doc(db, "reservations", reservation.id);
+      const currentCredits = reservation.balanceCredits || [];
+
+      const newCredit = {
+        amount: amount,
+        reason: reason,
+        showOnForm: showOnForm,
+        appliedBy: creditEmployee.name,
+        appliedByUid: creditEmployee.uid,
+        timestamp: new Date().toISOString()
+      };
+
+      const updatedCredits = [...currentCredits, newCredit];
+
+      // Store credits on the reservation document (not in payments collection)
+      await updateDoc(reservationRef, { balanceCredits: updatedCredits });
+
+      // Recalculate paymentStatus (credits add to effective "paid" amount)
+      const crNights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate);
+      const crRate = parseFloat(reservation.rate || 0);
+      const crBaseTotal = crRate * crNights;
+      const crAdj = calcAdjustmentTotal(reservation.balanceAdjustments);
+      const crTotalDue = crBaseTotal + crAdj;
+      const crCached = (window._allPaymentsCache || []).filter(p => p.reservationId === reservation.id && !p.voided);
+      const crActualPaid = crCached.reduce((s, p) => s + parseFloat(p.amount || 0), 0);
+      const crCreditTotal = updatedCredits.reduce((s, c) => s + parseFloat(c.amount || 0), 0);
+      const crTotalPaid = crActualPaid + crCreditTotal;
+      const crStatus = crTotalPaid >= crTotalDue ? 'fully_paid' : crTotalPaid > 0 ? 'partially_paid' : 'unpaid';
+      await updateDoc(reservationRef, { paymentStatus: crStatus });
+
+      // Audit log
+      const creditCustomer = customers.find(c => c.id === reservation.customerId) || {};
+      await auditLog(AUDIT_ACTIONS.BALANCE_ADJUSTMENT || 'BALANCE_CREDIT', {
+        type: 'credit',
+        amount: amount,
+        reason: reason,
+        showOnForm: showOnForm,
+        customerName: creditCustomer.name,
+        roomNumber: reservation.roomNumber,
+        reservationId: reservation.id
+      }, 'reservation', reservation.id);
+
+      alert(`Credit of $${amount.toFixed(2)} applied successfully!`);
+
+      // Clear form
+      creditAmountEl.value = "";
+      creditReasonEl.value = "";
+
+      // Refresh modal with updated data
+      const updatedRes = { ...reservation, balanceCredits: updatedCredits };
+
+      // Update global cache
+      if (window._reservationsCache) {
+        const cacheIndex = window._reservationsCache.findIndex(r => r.id === reservation.id);
+        if (cacheIndex !== -1) {
+          window._reservationsCache[cacheIndex] = { ...window._reservationsCache[cacheIndex], balanceCredits: updatedCredits };
+        }
+      }
+
+      await openManagePaymentModal(updatedRes);
+      await afterReservationOrPaymentChange();
+
+    } catch (err) {
+      console.error("Error applying credit:", err);
+      alert("Failed to apply credit. Please try again.");
+    }
+  });
+}
+
+// calcCreditTotal is defined at top-level (before initializeApp) so it's
+// accessible everywhere including computeLivePaymentStatus.
 
 
 // Helper: Generate Unique Receipt Number
@@ -3590,9 +4012,9 @@ function openMaintenanceModal(roomNumber) {
           actualCheckout: todayStr
         }, 'reservation', activeReservation.id);
         
-        alert(`✅ ${escapeHTML(customer.name || 'Guest')} checked out from Room ${roomNumber}`);
+        alert(`${escapeHTML(customer.name || 'Guest')} checked out from Room ${roomNumber}`);
         ModalManager.close('maintenanceModal');
-        await fillDashboard(); // Refresh the grid
+        try { await fillDashboard(); } catch (e) { console.error('Dashboard refresh failed after checkout:', e); }
       } catch (err) {
         console.error('Checkout error:', err);
         alert('Failed to checkout. Please try again.');
@@ -3605,13 +4027,13 @@ function openMaintenanceModal(roomNumber) {
   // Maintenance status
   if (isUnderMaintenance) {
     statusText.textContent = 'This room is currently under maintenance.';
-    toggleBtn.textContent = '✅ Remove from Maintenance';
+    toggleBtn.textContent = 'Remove from Maintenance';
     toggleBtn.style.background = 'var(--accent-success, #10b981)';
   } else {
     statusText.textContent = activeReservation 
       ? 'Room is occupied. You can still set it for maintenance after checkout.'
       : 'Set this room as under maintenance?';
-    toggleBtn.textContent = '🔧 Set Under Maintenance';
+    toggleBtn.textContent = 'Set Under Maintenance';
     toggleBtn.style.background = '#8b5cf6';
   }
   
@@ -3621,7 +4043,7 @@ function openMaintenanceModal(roomNumber) {
   const handleToggle = async () => {
     toggleMaintenanceRoom(roomNumber);
     ModalManager.close('maintenanceModal');
-    await fillDashboard(); // Refresh the grid
+    try { await fillDashboard(); } catch (e) { console.error('Dashboard refresh failed:', e); }
   };
   
   const handleClose = () => {
@@ -4235,9 +4657,7 @@ document.getElementById("confirmPaymentBtn")?.addEventListener("click", async ()
     const baseTotal = (parseFloat(reservation.rate) || 0) * nights;
     // Include balance adjustments (usually empty for new reservations)
     const adjustments = reservation.balanceAdjustments || [];
-    const totalAdjustment = adjustments.reduce((sum, adj) => {
-      return sum + (adj.type === 'discount' ? -adj.amount : adj.amount);
-    }, 0);
+    const totalAdjustment = calcAdjustmentTotal(adjustments);
     const totalDue = baseTotal + totalAdjustment;
     const totalPaid = cachedPayments.reduce((s, p) => s + parseFloat(p.amount || 0), 0) + amount;
     const newStatus = totalPaid >= totalDue ? "fully_paid" : "partially_paid";
@@ -4262,14 +4682,16 @@ document.getElementById("confirmPaymentBtn")?.addEventListener("click", async ()
     //CALL
     const customer = customers.find(c => c.id === latestCustomerId);
     const balance = Math.max(0, totalDue - totalPaid).toFixed(2);
-    showSMSConfirmationPopup(reservation, customer, receipt, amount, balance, nights);
 
     // Cleanup after transaction
     document.getElementById("paymentAmount").value = "";
     document.getElementById("previewReceiptNumber").value = "";
     previewReceiptNumber = null;
     ModalManager.close('addPaymentModal');
-    ModalManager.open('registrationPromptModal');
+
+    // Show check-in confirmation popup — it will open registrationPromptModal itself
+    // after the user responds. Do NOT open registrationPromptModal here.
+    showSMSConfirmationPopup(reservation, customer, receipt, amount, balance, nights);
 
     // Refresh dashboard after successful payment
     await afterReservationOrPaymentChange();
@@ -4450,7 +4872,8 @@ document.getElementById("idUploadInput")?.addEventListener("change", function (e
     relatedPayments = [];
   }
 
-  const sortedPayments = relatedPayments.sort((a, b) => (b.timestamp || "").localeCompare(a.timestamp || ""));
+  // Sort ASCENDING (oldest first) so running balance subtracts in correct order
+  const sortedPayments = relatedPayments.sort(comparePaymentsByTime);
   const rate = parseFloat(reservation.rate || 0);
   const arrival = new Date(reservation.arrivalDate);
   const departure = new Date(reservation.departureDate);
@@ -4458,11 +4881,11 @@ document.getElementById("idUploadInput")?.addEventListener("change", function (e
   const baseTotal = (parseFloat(reservation.rate) || 0) * nights;
   // Include balance adjustments
   const adjustments = reservation.balanceAdjustments || [];
-  const totalAdjustment = adjustments.reduce((sum, adj) => {
-    return sum + (adj.type === 'discount' ? -adj.amount : adj.amount);
-  }, 0);
+  const totalAdjustment = calcAdjustmentTotal(adjustments);
   const totalDue = baseTotal + totalAdjustment;
-  const totalPaid = relatedPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+  const actualPaid = relatedPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+  const creditTotal = calcCreditTotal(reservation.balanceCredits);
+  const totalPaid = actualPaid + creditTotal;
   let balanceRemaining = Math.max(0, totalDue - totalPaid);
   if (balanceRemaining < 0) balanceRemaining = 0;
 
@@ -4472,12 +4895,7 @@ document.getElementById("idUploadInput")?.addEventListener("change", function (e
     totalDue,
     balanceRemaining,
     receiptNumber: sortedPayments[0]?.receiptNumber || "—",
-    receipts: sortedPayments.slice(0, 4).map(p => ({
-      number: p.receiptNumber || "—",
-      date: p.timestamp ? formatDateDMY(p.timestamp) : "—",
-      amount: p.amount || "0.00",
-      method: p.method ? p.method.charAt(0).toUpperCase() + p.method.slice(1) : 'N/A'
-    }))
+    receipts: buildReceiptsWithBalance(sortedPayments, reservation)
   };
 
 const idToUse = customer?.idImageUrl || latestCroppedImageDataUrl || null;
@@ -4552,7 +4970,7 @@ document.getElementById("closeAddReservationBtn")?.addEventListener("click", () 
   ModalManager.close('addReservationModal');
 });
 document.getElementById("showAvailabilityBtn")?.addEventListener("click", () => {
-  ModalManager.open('availabilityModal');
+  window.location.href = 'availability.html';
 });
 document.getElementById("closeAvailabilityBtn")?.addEventListener("click", () => {
   ModalManager.close('availabilityModal');
@@ -4817,7 +5235,7 @@ function showEditDeletePopup(reservation) {
           <button id="viewHistoryBtn" class="btn btn-secondary btn-sm"><span class="material-icons">history</span> History</button>
           <button id="printRegistrationFromEditBtn" class="btn btn-secondary btn-sm"><span class="material-icons">print</span> Print</button>
           <button id="extendReservationBtn" class="btn btn-secondary btn-sm"><span class="material-icons">update</span> Extend</button>
-          <button id="lateFeeBtn" class="btn btn-danger btn-sm" style="background:linear-gradient(135deg,#dc2626,#b91c1c);"><span class="material-icons">schedule</span> Late Fee</button>
+          <button id="lateFeeBtn" class="btn btn-danger btn-sm"><span class="material-icons">schedule</span> Late Fee</button>
           <button id="managePaymentBtn" class="btn btn-warning btn-sm"><span class="material-icons">payments</span> Payment</button>
           <button id="deleteBtn" class="btn btn-danger btn-sm"><span class="material-icons">delete</span> Delete</button>
           <button id="saveEditBtn" class="btn btn-primary btn-sm"><span class="material-icons">save</span> Save</button>
@@ -4850,7 +5268,7 @@ function showEditDeletePopup(reservation) {
         checkedInBy: employee.uid,
         checkedInByName: employee.name
       });
-      alert("✅ Guest checked in!");
+      alert("Guest checked in!");
       reservation.checkedIn = true;
       reservation.checkedInTime = now;
       reservation.actualCheckInTime = now;
@@ -4883,7 +5301,7 @@ function showEditDeletePopup(reservation) {
         checkedOutBy: employee.uid,
         checkedOutByName: employee.name
       });
-      alert("✅ Guest checked out!");
+      alert("Guest checked out!");
       reservation.checkedOut = true;
       reservation.checkedOutTime = now;
       reservation.checkedOutBy = employee.uid;
@@ -4915,7 +5333,7 @@ function showEditDeletePopup(reservation) {
           checkedInBy: null,
           checkedInByName: null
         });
-        alert("↩ Check-in undone!");
+        alert("Check-in undone!");
         reservation.checkedIn = false;
         reservation.checkedInTime = null;
         reservation.actualCheckInTime = null;
@@ -4928,7 +5346,7 @@ function showEditDeletePopup(reservation) {
         console.error("Undo check-in failed:", err);
         alert("Failed to undo check-in. Please try again.");
         undoCheckInBtn.disabled = false;
-        undoCheckInBtn.textContent = "↩ Undo Check-In";
+        undoCheckInBtn.textContent = "Undo Check-In";
       }
     };
   }
@@ -4948,7 +5366,7 @@ function showEditDeletePopup(reservation) {
           checkedOutBy: null,
           checkedOutByName: null
         });
-        alert("↩ Check-out undone!");
+        alert("Check-out undone!");
         reservation.checkedOut = false;
         reservation.checkedOutTime = null;
         reservation.checkedOutBy = null;
@@ -4960,7 +5378,7 @@ function showEditDeletePopup(reservation) {
         console.error("Undo check-out failed:", err);
         alert("Failed to undo check-out. Please try again.");
         undoCheckOutBtn.disabled = false;
-        undoCheckOutBtn.textContent = "↩ Undo Check-Out";
+        undoCheckOutBtn.textContent = "Undo Check-Out";
       }
     };
   }
@@ -5145,13 +5563,11 @@ function showEditDeletePopup(reservation) {
         
         // Include balance adjustments (discounts/fees)
         const adjustments = reservation.balanceAdjustments || [];
-        const totalAdjustment = adjustments.reduce((sum, adj) => {
-          return sum + (adj.type === 'discount' ? -adj.amount : adj.amount);
-        }, 0);
+        const totalAdjustment = calcAdjustmentTotal(adjustments);
         const newTotalDue = baseTotal + totalAdjustment;
         
         // Sum up what's been paid
-        const totalPaid = reservationPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+        const totalPaid = reservationPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) + calcCreditTotal(reservation.balanceCredits);
         
         // Determine new payment status
         let newPaymentStatus = "not_paid";
@@ -5257,7 +5673,7 @@ function showEditDeletePopup(reservation) {
       fillDashboard();
     } catch (err) {
       console.error("Failed to save reservation:", err);
-      alert("❌ Failed to save changes. Please try again.");
+      alert("Failed to save changes. Please try again.");
       resetSaveBtn();
     }
   };
@@ -5338,7 +5754,7 @@ async function openLateFeeModal(reservation) {
     <div class="modal-content modal-scrollable" style="max-width: 500px;">
       <button class="close" aria-label="Close dialog" id="closeLateFeeModal">&times;</button>
       
-      <div style="text-align:center; padding:20px; background:linear-gradient(135deg, #dc2626, #b91c1c); color:#fff; border-radius:12px; margin-bottom:20px;">
+      <div style="text-align:center; padding:20px; background:#dc2626; color:#fff; border-radius:8px; margin-bottom:20px;">
         <span class="material-icons" style="font-size:48px; margin-bottom:8px;">schedule</span>
         <h2 style="margin:0; font-size:1.8em; font-weight:800;">⚠️ LATE FEE ⚠️</h2>
         <p style="margin:8px 0 0 0; opacity:0.9;">Late Checkout Penalty Charge</p>
@@ -5415,11 +5831,11 @@ async function openLateFeeModal(reservation) {
       
       <div class="modal-footer" style="display:flex; gap:12px; justify-content:flex-end;">
         <button id="cancelLateFee" class="btn btn-ghost">Cancel</button>
-        <button id="confirmLateFee" class="btn btn-primary" style="background:linear-gradient(135deg, #dc2626, #b91c1c);">
+        <button id="confirmLateFee" class="btn btn-danger">
           <span class="material-icons" style="vertical-align:middle;">check</span>
           Confirm Late Fee
         </button>
-        <button id="confirmLateFeeAndPrint" class="btn btn-primary" style="background:linear-gradient(135deg, #dc2626, #b91c1c);">
+        <button id="confirmLateFeeAndPrint" class="btn btn-danger">
           <span class="material-icons" style="vertical-align:middle;">print</span>
           Confirm & Print
         </button>
@@ -5567,6 +5983,17 @@ async function openLateFeeModal(reservation) {
         history: currentHistory
       });
       
+      // Update paymentStatus after late fee payment
+      const lfNights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate);
+      const lfRate = parseFloat(reservation.rate || 0);
+      const lfBaseTotal = lfRate * lfNights;
+      const lfAdj = calcAdjustmentTotal(reservation.balanceAdjustments);
+      const lfTotalDue = lfBaseTotal + lfAdj;
+      const lfCached = (window._allPaymentsCache || []).filter(p => p.reservationId === reservation.id && !p.voided);
+      const lfTotalPaid = lfCached.reduce((s, p) => s + parseFloat(p.amount || 0), 0) + lateFeeAmount;
+      const lfStatus = lfTotalPaid >= lfTotalDue ? 'fully_paid' : 'partially_paid';
+      await updateDoc(doc(db, "reservations", reservation.id), { paymentStatus: lfStatus });
+      
       // Audit log - specifically for late fees
       await auditLog(AUDIT_ACTIONS.LATE_FEE, {
         receiptNumber: lateFeeReceiptNumber,
@@ -5584,7 +6011,7 @@ async function openLateFeeModal(reservation) {
         window._lastReservationForPopup.history = currentHistory;
       }
       
-      alert(`✅ Late Fee recorded successfully!\n\nReceipt #${lateFeeReceiptNumber}\nAmount: $${lateFeeAmount.toFixed(2)}\n\nThis has been sent to QuickBooks with "LATE FEE" in the description.`);
+      alert(`Late Fee recorded successfully!\n\nReceipt #${lateFeeReceiptNumber}\nAmount: $${lateFeeAmount.toFixed(2)}\n\nThis has been sent to QuickBooks with "LATE FEE" in the description.`);
       
       // Print if requested
       if (shouldPrint) {
@@ -5608,11 +6035,11 @@ async function openLateFeeModal(reservation) {
         window._lastReservationForPopup = null;
       }
       
-      await fillDashboard();
+      try { await fillDashboard(); } catch (e) { console.error('Dashboard refresh failed after late fee:', e); }
       
     } catch (err) {
       console.error("Error recording late fee:", err);
-      alert("❌ Failed to record late fee. Please try again.");
+      alert("Failed to record late fee. Please try again.");
       resetButtons();
     }
   };
@@ -5708,7 +6135,7 @@ function showReservationHistory(reservation) {
         timelineHTML += `
           <div style="position:relative; padding-left:40px; padding-bottom:30px; border-left:3px solid #3b82f6;">
             <div style="position:absolute; left:-12px; top:0; width:20px; height:20px; border-radius:50%; background:#3b82f6; border:3px solid #fff;"></div>
-            <div style="background:linear-gradient(135deg, #3b82f6, #1d4ed8); color:#fff; padding:15px; border-radius:10px; box-shadow:0 2px 8px rgba(59,130,246,0.3);">
+            <div style="background:#3b82f6; color:#fff; padding:15px; border-radius:8px;">
               <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
                 <span class="material-icons">add_circle</span>
                 <strong style="font-size:1.1em;">Reservation Created</strong>
@@ -5734,7 +6161,7 @@ function showReservationHistory(reservation) {
         timelineHTML += `
           <div style="position:relative; padding-left:40px; padding-bottom:30px; border-left:3px solid #10b981;">
             <div style="position:absolute; left:-12px; top:0; width:20px; height:20px; border-radius:50%; background:#10b981; border:3px solid #fff;"></div>
-            <div style="background:linear-gradient(135deg, #10b981, #059669); color:#fff; padding:15px; border-radius:10px; box-shadow:0 2px 8px rgba(16,185,129,0.3);">
+            <div style="background:#10b981; color:#fff; padding:15px; border-radius:8px;">
               <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
                 <span class="material-icons">event_available</span>
                 <strong style="font-size:1.1em;">Extended</strong>
@@ -5762,7 +6189,7 @@ function showReservationHistory(reservation) {
         timelineHTML += `
           <div style="position:relative; padding-left:40px; padding-bottom:30px; border-left:3px solid #f59e0b;">
             <div style="position:absolute; left:-12px; top:0; width:20px; height:20px; border-radius:50%; background:#f59e0b; border:3px solid #fff;"></div>
-            <div style="background:linear-gradient(135deg, #f59e0b, #d97706); color:#fff; padding:15px; border-radius:10px; box-shadow:0 2px 8px rgba(245,158,11,0.3);">
+            <div style="background:#f59e0b; color:#fff; padding:15px; border-radius:8px;">
               <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
                 <span class="material-icons">edit</span>
                 <strong style="font-size:1.1em;">Modified</strong>
@@ -5784,7 +6211,7 @@ function showReservationHistory(reservation) {
         timelineHTML += `
           <div style="position:relative; padding-left:40px; padding-bottom:30px; border-left:3px solid #dc2626;">
             <div style="position:absolute; left:-12px; top:0; width:20px; height:20px; border-radius:50%; background:#dc2626; border:3px solid #fff;"></div>
-            <div style="background:linear-gradient(135deg, #dc2626, #b91c1c); color:#fff; padding:15px; border-radius:10px; box-shadow:0 2px 8px rgba(220,38,38,0.3);">
+            <div style="background:#dc2626; color:#fff; padding:15px; border-radius:8px;">
               <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
                 <span class="material-icons">schedule</span>
                 <strong style="font-size:1.2em;">⚠️ LATE FEE ⚠️</strong>
@@ -5817,7 +6244,7 @@ function showReservationHistory(reservation) {
       </div>
 
       <div class="reservation-info-card" style="margin-bottom:20px;">
-        <div style="text-align:center; padding:15px; background:linear-gradient(135deg, #8b5cf6, #7c3aed); color:#fff; border-radius:8px;">
+        <div style="text-align:center; padding:15px; background:#7c3aed; color:#fff; border-radius:8px;">
           <div style="font-size:1.3em; font-weight:600;">${escapeHTML(customer.name || 'Unknown Guest')}</div>
           <div style="font-size:0.95em; opacity:0.9; margin-top:4px;">Room ${reservation.roomNumber}</div>
           <div style="font-size:0.85em; opacity:0.8; margin-top:8px;">
@@ -5901,13 +6328,12 @@ async function showReceiptDetails(receiptNumber) {
     const baseTotal = (parseFloat(reservation.rate) || 0) * nights;
     // Include balance adjustments
     const adjustments = reservation.balanceAdjustments || [];
-    const totalAdjustment = adjustments.reduce((sum, adj) => {
-      return sum + (adj.type === 'discount' ? -adj.amount : adj.amount);
-    }, 0);
+    const totalAdjustment = calcAdjustmentTotal(adjustments);
     totalDue = baseTotal + totalAdjustment;
     // Filter out voided payments
     const resPayments = allPayments.filter(p => p.reservationId === reservation.id && !p.voided);
-    totalPaid = resPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+    const actualPaid = resPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+    totalPaid = actualPaid + calcCreditTotal(reservation.balanceCredits);
     balance = Math.max(0, totalDue - totalPaid);
   }
   
@@ -5965,7 +6391,7 @@ async function showReceiptDetails(receiptNumber) {
         <div><strong>Room:</strong></div><div>${reservation.roomNumber}</div>
         <div><strong>Check-In:</strong></div><div>${formatDateDMY(reservation.arrivalDate)}</div>
         <div><strong>Check-Out:</strong></div><div>${formatDateDMY(reservation.departureDate)}</div>
-        <div><strong>Total Due:</strong></div><div>$${totalDue.toFixed(2)}</div>
+        <div><strong>Total Cost:</strong></div><div>$${totalDue.toFixed(2)}</div>
         <div><strong>Total Paid:</strong></div><div style="color:#10b981;">$${totalPaid.toFixed(2)}</div>
         <div><strong>Balance:</strong></div><div style="color:${balance > 0 ? '#ef4444' : '#10b981'};">$${balance.toFixed(2)}</div>
       </div>
@@ -6204,7 +6630,7 @@ async function loadBatchCloseHistory() {
     renderBatchCloseHistoryList(_batchCloseHistorySessions);
   } catch (err) {
     console.error('Failed to load batch close sessions:', err);
-    listEl.innerHTML = '<div style="padding:40px; text-align:center; color:#ef4444;"><div style="font-size:2em; margin-bottom:8px;">❌</div>Failed to load sessions. Please try again.</div>';
+    listEl.innerHTML = '<div style="padding:40px; text-align:center; color:#ef4444;"><div style="font-size:2em; margin-bottom:8px;"></div>Failed to load sessions. Please try again.</div>';
   }
 }
 
@@ -6298,7 +6724,7 @@ function renderBatchCloseHistoryList(allSessions) {
   
   // Build the sessions list
   listEl.innerHTML = `
-    <div style="background:linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%); border-radius:12px; padding:16px; margin-bottom:20px;">
+    <div style="background:#e0f2fe; border-radius:8px; padding:16px; margin-bottom:20px;">
       <div style="display:flex; justify-content:space-around; flex-wrap:wrap; gap:16px;">
         <div style="text-align:center;">
           <div style="font-size:1.8em; font-weight:700; color:#0284c7;">${filteredSessions.length}</div>
@@ -6514,7 +6940,7 @@ function printHistorySession() {
         <div class="summary-card"><div class="value">$${totalCollected.toFixed(2)}</div><div class="label">Total Collected</div></div>
       </div>
       
-      <div class="section-title">💵 Payments</div>
+      <div class="section-title">Payments</div>
       <table>
         <thead>
           <tr>
@@ -6543,7 +6969,7 @@ function printHistorySession() {
         </tfoot>
       </table>
       
-      <div class="section-title">🏨 Reservations</div>
+      <div class="section-title">Reservations</div>
       <table>
         <thead>
           <tr>
@@ -6774,13 +7200,12 @@ document.getElementById('generateBatchCloseBtn')?.addEventListener('click', asyn
     const baseTotal = (parseFloat(res.rate) || 0) * nights;
     // Include balance adjustments
     const adjustments = res.balanceAdjustments || [];
-    const totalAdjustment = adjustments.reduce((sum, adj) => {
-      return sum + (adj.type === 'discount' ? -adj.amount : adj.amount);
-    }, 0);
+    const totalAdjustment = calcAdjustmentTotal(adjustments);
     const totalDue = baseTotal + totalAdjustment;
     // Use ALL payments for accurate balance (not filtered by staff)
     const resPayments = allPaymentsForBalance.filter(p => p.reservationId === res.id);
-    const totalPaid = resPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+    const actualPaid = resPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+    const totalPaid = actualPaid + calcCreditTotal(res.balanceCredits);
     totalOutstanding += Math.max(0, totalDue - totalPaid);
 
     if (res.checkedOut) checkedOutCount++;
@@ -6801,13 +7226,13 @@ document.getElementById('generateBatchCloseBtn')?.addEventListener('click', asyn
   
   // Info banner - show for all users
   const infoBanner = excludedCount > 0 ? `
-    <div style="margin-bottom:12px; padding:12px 16px; background:linear-gradient(135deg, #e0f2fe, #bae6fd); border-radius:10px; color:#0369a1; border-left:4px solid #0284c7;">
+    <div style="margin-bottom:12px; padding:12px 16px; background:#e0f2fe; border-radius:8px; color:#0369a1; border-left:4px solid #0284c7;">
       <strong>ℹ️ Batch Close Report</strong><br>
       <span style="font-size:0.9em;">Showing ${periodPayments.length} NEW payment(s) not yet batched</span><br>
       <span style="font-size:0.85em; opacity:0.8;">${excludedCount} payment(s) excluded (already in previous batch sessions)</span>
     </div>
   ` : `
-    <div style="margin-bottom:12px; padding:12px 16px; background:linear-gradient(135deg, #dcfce7, #bbf7d0); border-radius:10px; color:#166534; border-left:4px solid #22c55e;">
+    <div style="margin-bottom:12px; padding:12px 16px; background:#dcfce7; border-radius:8px; color:#166534; border-left:4px solid #22c55e;">
       <strong>📊 Batch Close Report</strong><br>
       <span style="font-size:0.9em;">Showing all ${periodPayments.length} payment(s) for this period</span>
     </div>
@@ -6815,19 +7240,19 @@ document.getElementById('generateBatchCloseBtn')?.addEventListener('click', asyn
 
   summaryContainer.innerHTML = `
     ${infoBanner}
-    <div style="background:linear-gradient(135deg, #3b82f6, #1d4ed8); color:white; padding:20px; border-radius:12px; text-align:center;">
+    <div style="background:#3b82f6; color:white; padding:20px; border-radius:8px; text-align:center;">
       <div style="font-size:2em; font-weight:700;">${periodReservations.length}</div>
       <div style="font-size:0.9em; opacity:0.9;">Reservations</div>
     </div>
-    <div style="background:linear-gradient(135deg, #10b981, #059669); color:white; padding:20px; border-radius:12px; text-align:center;">
+    <div style="background:#10b981; color:white; padding:20px; border-radius:8px; text-align:center;">
       <div style="font-size:2em; font-weight:700;">$${totalCollected.toFixed(2)}</div>
       <div style="font-size:0.9em; opacity:0.9;">Collected</div>
     </div>
-    <div style="background:linear-gradient(135deg, #ef4444, #dc2626); color:white; padding:20px; border-radius:12px; text-align:center;">
+    <div style="background:#ef4444; color:white; padding:20px; border-radius:8px; text-align:center;">
       <div style="font-size:2em; font-weight:700;">$${totalOutstanding.toFixed(2)}</div>
       <div style="font-size:0.9em; opacity:0.9;">Outstanding</div>
     </div>
-    <div style="background:linear-gradient(135deg, #8b5cf6, #7c3aed); color:white; padding:20px; border-radius:12px; text-align:center;">
+    <div style="background:#7c3aed; color:white; padding:20px; border-radius:8px; text-align:center;">
       <div style="font-size:1.4em; font-weight:700;">${checkedInCount} / ${checkedOutCount} / ${pendingCount}</div>
       <div style="font-size:0.9em; opacity:0.9;">In / Out / Pending</div>
     </div>
@@ -6836,12 +7261,11 @@ document.getElementById('generateBatchCloseBtn')?.addEventListener('click', asyn
   // Build details table
   const detailsContainer = document.getElementById('batchCloseDetails');
 
-  if (periodPayments.length === 0) {
+  if (periodPayments.length === 0 && periodReservations.length === 0) {
     detailsContainer.innerHTML = `
       <div style="text-align:center; padding:40px; color:#666;">
         <div style="font-size:3em; margin-bottom:10px;">📭</div>
-        <p>No NEW payments to batch for this period.</p>
-        <p style="font-size:0.9em; color:#888;">All payments have already been included in previous batch close sessions.</p>
+        <p>No reservations or payments found for this period.</p>
       </div>
     `;
     return;
@@ -6864,7 +7288,7 @@ document.getElementById('generateBatchCloseBtn')?.addEventListener('click', asyn
           <th style="padding:10px 8px; text-align:left; border-bottom:2px solid var(--border-medium, #ccc);">Dates</th>
           <th style="padding:10px 8px; text-align:center; border-bottom:2px solid var(--border-medium, #ccc);">Nights</th>
           <th style="padding:10px 8px; text-align:center; border-bottom:2px solid var(--border-medium, #ccc);">Status</th>
-          <th style="padding:10px 8px; text-align:right; border-bottom:2px solid var(--border-medium, #ccc);">Due</th>
+          <th style="padding:10px 8px; text-align:right; border-bottom:2px solid var(--border-medium, #ccc);">Cost</th>
           <th style="padding:10px 8px; text-align:right; border-bottom:2px solid var(--border-medium, #ccc);">Paid (This Batch)</th>
           <th style="padding:10px 8px; text-align:right; border-bottom:2px solid var(--border-medium, #ccc);">Balance</th>
           <th style="padding:10px 8px; text-align:left; border-bottom:2px solid var(--border-medium, #ccc);">Payment Details (Recorded By)</th>
@@ -6879,14 +7303,12 @@ document.getElementById('generateBatchCloseBtn')?.addEventListener('click', asyn
     const baseTotal = (parseFloat(res.rate) || 0) * nights;
     // Include balance adjustments
     const adjustments = res.balanceAdjustments || [];
-    const totalAdjustment = adjustments.reduce((sum, adj) => {
-      return sum + (adj.type === 'discount' ? -adj.amount : adj.amount);
-    }, 0);
+    const totalAdjustment = calcAdjustmentTotal(adjustments);
     const totalDue = baseTotal + totalAdjustment;
     // All payments (excluding voided) for balance calculation - use unfiltered cache
     const allPaymentsForBalance = [...(window._allPaymentsCache || [])].filter(p => !p.voided);
     const allResPayments = allPaymentsForBalance.filter(p => p.reservationId === res.id);
-    const totalPaidAllTime = allResPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+    const totalPaidAllTime = allResPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) + calcCreditTotal(res.balanceCredits);
     const balance = Math.max(0, totalDue - totalPaidAllTime);
     
     // Period payments only - what was paid during this report period
@@ -6920,9 +7342,9 @@ document.getElementById('generateBatchCloseBtn')?.addEventListener('click', asyn
       paymentDetailsHtml = '<span style="color:#999; font-size:11px;">No new payments</span>';
     }
 
-    // Status badge - use StatusUtils for consistency
+    // Status badge - compute status from live payments cache (never trust stale paymentStatus field)
     const checkStatus = StatusUtils.formatCheckStatus(res);
-    const paymentStatusInfo = StatusUtils.formatPaymentStatus(res.paymentStatus);
+    const paymentStatusInfo = StatusUtils.formatPaymentStatus(computeLivePaymentStatus(res));
     const statusHtml = `
       <span style="background:${checkStatus.color}; color:white; padding:2px 8px; border-radius:4px; font-size:11px;">${checkStatus.text === 'Checked Out' ? 'Out' : checkStatus.text === 'Checked In' ? 'In' : 'Pending'}</span>
       <span style="display:block; margin-top:3px; font-size:10px; color:${paymentStatusInfo.color}; font-weight:600;">${paymentStatusInfo.text}</span>
@@ -7041,10 +7463,10 @@ document.getElementById('printBatchCloseBtn')?.addEventListener('click', async (
       await addDoc(collection(db, 'batch_close_sessions'), sessionToSave);
       // Clear session data so it doesn't get saved again if printed twice
       delete window._batchCloseData.sessionData;
-      showToast('✅ Batch close session saved to history', 'success');
+      showToast('Batch close session saved to history', 'success');
     } catch (err) {
       console.error('Failed to save batch close session:', err);
-      showToast('⚠️ Report printed but session could not be saved', 'warning');
+      showToast('Report printed but session could not be saved', 'warning');
     }
   }
 
@@ -7114,7 +7536,7 @@ document.getElementById('downloadBatchCloseCsvBtn')?.addEventListener('click', (
   const employeeNames = {};
   
   // Build CSV header
-  let csvHeader = 'Guest Name,Phone,Address,Room,Check-In,Check-Out,Nights,Rate,Total Due,Total Paid (All Time),Balance,Payment Status,Check Status,Period Payments (Receipt#,Amount,Method,Date,Recorded By)';
+  let csvHeader = 'Guest Name,Phone,Address,Room,Check-In,Check-Out,Nights,Rate,Total Cost,Total Paid (All Time),Balance,Payment Status,Check Status,Period Payments (Receipt#,Amount,Method,Date,Recorded By)';
   if (isAdminOrManager) {
     csvHeader += ',Reservation Created By';
   }
@@ -7128,13 +7550,11 @@ document.getElementById('downloadBatchCloseCsvBtn')?.addEventListener('click', (
     const baseTotal = (parseFloat(res.rate) || 0) * nights;
     // Include balance adjustments
     const adjustments = res.balanceAdjustments || [];
-    const totalAdjustment = adjustments.reduce((sum, adj) => {
-      return sum + (adj.type === 'discount' ? -adj.amount : adj.amount);
-    }, 0);
+    const totalAdjustment = calcAdjustmentTotal(adjustments);
     const totalDue = baseTotal + totalAdjustment;
     // Filter out voided payments
     const resPay = allPayments.filter(p => p.reservationId === res.id && !p.voided);
-    const totalPaid = resPay.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+    const totalPaid = resPay.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) + calcCreditTotal(res.balanceCredits);
     const balance = Math.max(0, totalDue - totalPaid);
 
     // Get period payments with details
@@ -7154,9 +7574,11 @@ document.getElementById('downloadBatchCloseCsvBtn')?.addEventListener('click', (
       return `#${p.receiptNumber} $${parseFloat(p.amount).toFixed(2)} ${p.method || 'cash'} ${dateStr} by ${recorderName}`;
     }).join('; ') || 'None';
 
+    // Compute status from live payments (never trust stale paymentStatus field)
+    const csvLiveStatus = computeLivePaymentStatus(res);
     let payStatus = 'Unpaid';
-    if (res.paymentStatus === 'fully_paid' || res.paymentStatus === 'paid') payStatus = 'Fully Paid';
-    else if (res.paymentStatus === 'partially_paid') payStatus = 'Partial';
+    if (csvLiveStatus === 'fully_paid') payStatus = 'Fully Paid';
+    else if (csvLiveStatus === 'partially_paid') payStatus = 'Partial';
 
     let checkStatus = 'Pending';
     if (res.checkedOut) checkStatus = 'Checked Out';
@@ -7166,10 +7588,6 @@ document.getElementById('downloadBatchCloseCsvBtn')?.addEventListener('click', (
 
     const row = [
       `"${(customer.name || '').replace(/"/g, '""')}"`,
-      `"${(customer.telephone || '').replace(/"/g, '""')}"`,
-      `"${(customer.address || '').replace(/"/g, '""')}"`,
-      res.roomNumber,
-      res.arrivalDate,
       `"${(customer.telephone || '').replace(/"/g, '""')}"`,
       `"${(customer.address || '').replace(/"/g, '""')}"`,
       res.roomNumber,
@@ -7532,6 +7950,98 @@ async function openExtendReservationModal(reservation) {
   extensionRateInput.value = reservation.rate || "";
   extensionAmountInput.value = "";
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // LIVE EXTENSION SUMMARY: Auto-calculate when departure date or rate changes
+  // ─────────────────────────────────────────────────────────────────────────
+  const summaryBox      = document.getElementById("extendSummaryBox");
+  const currentDepEl    = document.getElementById("extendCurrentDep");
+  const newDepEl        = document.getElementById("extendNewDep");
+  const addNightsEl     = document.getElementById("extendAdditionalNights");
+  const expectedCostEl  = document.getElementById("extendExpectedCost");
+
+  // Show current departure in the summary
+  if (currentDepEl) currentDepEl.textContent = formatDateDMY(reservation.departureDate);
+
+  const updateExtensionSummary = () => {
+    const newDep = extensionDepartureInput.value;
+    const rate = parseFloat(extensionRateInput.value) || parseFloat(reservation.rate) || 0;
+
+    if (!reservation.departureDate) {
+      if (summaryBox) summaryBox.style.display = "none";
+      return;
+    }
+
+    // Extension-specific: additional nights and expected extra cost
+    let additionalNights = 0;
+    let expectedCost = 0;
+    if (newDep) {
+      const currentDep = normalizeDate(reservation.departureDate);
+      const newDepDate = normalizeDate(newDep);
+      additionalNights = Math.ceil((newDepDate - currentDep) / (1000 * 60 * 60 * 24));
+      if (additionalNights > 0) expectedCost = additionalNights * rate;
+    }
+
+    // Always compute balance using the effective end date
+    const depForBalance = (additionalNights > 0) ? newDep : reservation.departureDate;
+    const extTotalNights = calculateSpecialNights(reservation.arrivalDate, depForBalance);
+    const extBaseTotal = rate * extTotalNights;
+    const extAdj = calcAdjustmentTotal(reservation.balanceAdjustments);
+    const extNewTotal = extBaseTotal + extAdj;
+    const extPaid = (window._allPaymentsCache || [])
+      .filter(p => p.reservationId === reservation.id && !p.voided)
+      .reduce((s, p) => s + parseFloat(p.amount || 0), 0) + calcCreditTotal(reservation.balanceCredits);
+    const extBalance = Math.max(0, extNewTotal - extPaid);
+
+    // Always show the summary box so balance is visible on open and on rate change
+    if (summaryBox) summaryBox.style.display = "block";
+    if (newDepEl)       newDepEl.textContent = additionalNights > 0 ? formatDateDMY(newDep) : '—';
+    if (addNightsEl)    addNightsEl.textContent = additionalNights > 0 ? additionalNights : '—';
+    if (expectedCostEl) expectedCostEl.textContent = additionalNights > 0 ? `$${expectedCost.toFixed(2)}` : '—';
+
+    // Show or update balance info
+    let balanceInfoEl = summaryBox.querySelector('#extendBalanceInfo');
+    if (!balanceInfoEl) {
+      balanceInfoEl = document.createElement('div');
+      balanceInfoEl.id = 'extendBalanceInfo';
+      balanceInfoEl.style.cssText = 'grid-column:1/-1; border-top:1px solid var(--border-light, #ddd); padding-top:6px; margin-top:4px; display:grid; grid-template-columns:1fr 1fr; gap:6px;';
+      const gridDiv = summaryBox.querySelector('div[style*="grid"]');
+      if (gridDiv) gridDiv.appendChild(balanceInfoEl);
+    }
+    if (balanceInfoEl) {
+      balanceInfoEl.innerHTML = `
+        <div><span style="color:var(--text-muted);">Total cost:</span> <strong>$${extNewTotal.toFixed(2)}</strong></div>
+        <div><span style="color:var(--text-muted);">Total paid:</span> <strong style="color:#10b981;">$${extPaid.toFixed(2)}</strong></div>
+        <div style="grid-column:1/-1;"><span style="color:var(--text-muted);">Outstanding balance:</span> <strong style="color:${extBalance > 0 ? '#ef4444' : '#10b981'};">$${extBalance.toFixed(2)}</strong></div>
+      `;
+    }
+
+    // Auto-fill amount only when there IS an extension and field is empty
+    if (!extensionAmountInput.value && additionalNights > 0) {
+      extensionAmountInput.value = expectedCost.toFixed(2);
+    }
+  };
+
+  // Remove stale listeners from previous opens to prevent accumulation
+  if (extensionDepartureInput._extSummaryHandler) {
+    extensionDepartureInput.removeEventListener("change", extensionDepartureInput._extSummaryHandler);
+  }
+  if (extensionRateInput._extSummaryHandler) {
+    extensionRateInput.removeEventListener("input", extensionRateInput._extSummaryHandler);
+  }
+  extensionDepartureInput._extSummaryHandler = updateExtensionSummary;
+  extensionRateInput._extSummaryHandler = updateExtensionSummary;
+  extensionDepartureInput.addEventListener("change", updateExtensionSummary);
+  extensionRateInput.addEventListener("input", updateExtensionSummary);
+
+  // Show initial balance summary immediately when modal opens
+  updateExtensionSummary();
+
+  // Set min date to day after current departure
+  const minDate = new Date(reservation.departureDate);
+  minDate.setDate(minDate.getDate() + 1);
+  const minStr = `${minDate.getFullYear()}-${String(minDate.getMonth() + 1).padStart(2, '0')}-${String(minDate.getDate()).padStart(2, '0')}`;
+  extensionDepartureInput.min = minStr;
+
   // PREVIEW next receipt number (do not reserve)
   try {
     const extensionPreviewReceipt = await getNextPreviewReceiptNumber();
@@ -7540,6 +8050,10 @@ async function openExtendReservationModal(reservation) {
     console.warn("Preview receipt fetch failed", err);
     extensionReceiptInput.value = "";
   }
+
+  // Prevent form submission (Enter key) from reloading the page
+  const extendForm = document.getElementById("extendReservationForm");
+  if (extendForm) extendForm.onsubmit = (e) => e.preventDefault();
 
   // ─────────────────────────────────────────────────────────────────────────
   // CLOSE HANDLERS
@@ -7583,9 +8097,9 @@ async function openExtendReservationModal(reservation) {
       return null;
     }
 
-    // Check payment amount
-    if (!extensionAmount || isNaN(extensionAmount) || extensionAmount <= 0) {
-      alert("Please enter the 'Amount Being Paid' before confirming extension.");
+    // Check payment amount — allow 0 for no-payment extensions
+    if (isNaN(extensionAmount) || extensionAmount < 0) {
+      alert("Please enter a valid payment amount (0 or more).");
       return null;
     }
 
@@ -7666,7 +8180,9 @@ async function openExtendReservationModal(reservation) {
         // Re-enable buttons before closing (for if modal opens again)
         enableExtensionButtons();
         
-        alert("✅ Extension saved successfully!\n\nReceipt #" + extensionReceipt);
+        alert(extensionReceipt 
+          ? "Extension saved successfully!\n\nReceipt #" + extensionReceipt
+          : "Extension saved successfully!\n\nNo payment recorded — checkout date updated.");
         ModalManager.close('extendReservationModal');
 
         // If opened from dashboard, prompt to print registration form
@@ -7690,7 +8206,7 @@ async function openExtendReservationModal(reservation) {
         }
       } catch (err) {
         console.error("Failed to save extension:", err);
-        alert("❌ Failed to save extension. Please try again.");
+        alert("Failed to save extension. Please try again.");
         enableExtensionButtons();
       }
     };
@@ -7741,7 +8257,11 @@ async function openExtendReservationModal(reservation) {
         enableExtensionButtons();
 
         ModalManager.close('extendReservationModal');
-        printReceipt(extensionReceipt);
+        if (extensionReceipt) {
+          printReceipt(extensionReceipt);
+        } else {
+          alert("Extension saved (no payment). Checkout date updated.");
+        }
 
         // If opened from dashboard, clear flag
         if (window._extendFromDashboard) {
@@ -7755,7 +8275,7 @@ async function openExtendReservationModal(reservation) {
         }
       } catch (err) {
         console.error("Failed to save extension:", err);
-        alert("❌ Failed to save extension. Please try again.");
+        alert("Failed to save extension. Please try again.");
         enableExtensionButtons();
       }
     };
@@ -7769,6 +8289,9 @@ async function openExtendReservationModal(reservation) {
 // Uses consistent variable naming throughout
 async function saveExtensionPayment(reservation, extensionData) {
   const { newDeparture, rate, amount, method } = extensionData;
+  
+  // CRITICAL: Capture old departure BEFORE any mutation
+  const previousDeparture = reservation.departureDate;
   
   // Calculate nights for the extended reservation (from original arrival to new departure)
   const extensionTotalNights = calculateSpecialNights(
@@ -7796,9 +8319,10 @@ async function saveExtensionPayment(reservation, extensionData) {
   const extensionHistoryEntry = {
     type: 'extended',
     date: new Date().toISOString(),
-    previousDeparture: reservation.departureDate,
+    previousDeparture: previousDeparture,
     newDeparture: newDeparture,
     totalNights: extensionTotalNights,
+    previousRate: parseFloat(reservation.rate) || 0,
     rate: rate || reservation.rate,
     by: extensionEmployee.uid,
     byName: extensionEmployee.name,
@@ -7840,15 +8364,24 @@ async function saveExtensionPayment(reservation, extensionData) {
       recordedBy: extensionEmployee.uid,
       recordedByName: extensionEmployee.name,
       isExtension: true,
-      previousDeparture: reservation.departureDate,
+      previousDeparture: previousDeparture,
       newDeparture: newDeparture,
       qbSyncStatus: 'pending'
     });
     
-    // Update history entry with receipt number
+    // Update history entry with receipt number and recalculate paymentStatus
     if (extensionHistory.length > 0) {
       extensionHistory[extensionHistory.length - 1].receiptNumber = extensionReceiptNumber;
-      await updateDoc(doc(db, "reservations", reservation.id), { history: extensionHistory });
+      // Recalculate payment status after extension changes the total due
+      const extNights = calculateSpecialNights(reservation.arrivalDate, newDeparture);
+      const extRate = parseFloat(rate || reservation.rate || 0);
+      const extBaseTotal = extRate * extNights;
+      const extAdj = calcAdjustmentTotal(reservation.balanceAdjustments);
+      const extTotalDue = extBaseTotal + extAdj;
+      const extCached = (window._allPaymentsCache || []).filter(p => p.reservationId === reservation.id && !p.voided);
+      const extTotalPaid = extCached.reduce((s, p) => s + parseFloat(p.amount || 0), 0) + amount;
+      const extStatus = extTotalPaid >= extTotalDue ? 'fully_paid' : 'partially_paid';
+      await updateDoc(doc(db, "reservations", reservation.id), { history: extensionHistory, paymentStatus: extStatus });
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -7869,7 +8402,7 @@ async function saveExtensionPayment(reservation, extensionData) {
     const extensionReservationForQB = { 
       ...reservation, 
       departureDate: newDeparture, 
-      notes: `Extension - Previous checkout: ${formatDateDMY(reservation.departureDate)}. ${reservation.note || ""}`.trim()
+      notes: `Extension - Previous checkout: ${formatDateDMY(previousDeparture)}. ${reservation.note || ""}`.trim()
     };
     
     const extensionQBData = buildQuickBooksPaymentData(
@@ -7890,7 +8423,7 @@ async function saveExtensionPayment(reservation, extensionData) {
     // AUDIT LOG
     // ─────────────────────────────────────────────────────────────────────────
     await auditLog(AUDIT_ACTIONS.RESERVATION_EXTEND, {
-      previousDeparture: reservation.departureDate,
+      previousDeparture: previousDeparture,
       newDeparture: newDeparture,
       receiptNumber: extensionReceiptNumber,
       amount: amount,
@@ -7913,11 +8446,30 @@ async function saveExtensionPayment(reservation, extensionData) {
         recordedBy: extensionEmployee.uid,
         recordedByName: extensionEmployee.name,
         isExtension: true,
-        previousDeparture: reservation.departureDate,
+        previousDeparture: previousDeparture,
         newDeparture: newDeparture
       });
       console.log('✅ Added extension payment to _allPaymentsCache:', extensionReceiptNumber);
     }
+  } else {
+    // $0 extension — no payment record, but still recalculate paymentStatus
+    const extNights = calculateSpecialNights(reservation.arrivalDate, newDeparture);
+    const extRate = parseFloat(rate || reservation.rate || 0);
+    const extBaseTotal = extRate * extNights;
+    const extAdj = calcAdjustmentTotal(reservation.balanceAdjustments);
+    const extTotalDue = extBaseTotal + extAdj;
+    const extCached = (window._allPaymentsCache || []).filter(p => p.reservationId === reservation.id && !p.voided);
+    const extTotalPaid = extCached.reduce((s, p) => s + parseFloat(p.amount || 0), 0);
+    const extStatus = extTotalPaid >= extTotalDue ? 'fully_paid' : (extTotalPaid > 0 ? 'partially_paid' : 'unpaid');
+    await updateDoc(doc(db, "reservations", reservation.id), { paymentStatus: extStatus });
+
+    // Audit log for $0 extension
+    const extensionCustomer = customers.find(c => c.id === reservation.customerId) || {};
+    await auditLog(AUDIT_ACTIONS.RESERVATION_EXTEND, {
+      previousDeparture, newDeparture,
+      amount: 0, roomNumber: reservation.roomNumber,
+      customerName: extensionCustomer.name
+    }, 'reservation', reservation.id);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -7941,10 +8493,10 @@ async function saveExtensionPayment(reservation, extensionData) {
   const startDateVal = document.getElementById("startDate")?.value;
   const endDateVal = document.getElementById("endDate")?.value;
   if (startDateVal && endDateVal && availModal && availModal.style.display !== 'none') {
-    await renderAvailabilityGrid();
+    try { await renderAvailabilityGrid(); } catch (e) { console.error("Availability grid refresh failed:", e); }
   }
   
-  await fillDashboard();
+  try { await fillDashboard(); } catch (e) { console.error("Dashboard refresh failed after extension (data was saved):", e); }
 
   return extensionReceiptNumber;
 }
@@ -8135,18 +8687,18 @@ function showCustomerListModal() {
       const div = document.createElement("div");
       div.style.cssText = `
         display:flex; align-items:center; gap:12px; padding:10px 14px;
-        cursor:pointer; transition:all 0.15s ease; border-bottom:1px solid var(--border-light);
+        cursor:pointer; border-bottom:1px solid var(--border-light);
       `;
       div.innerHTML = `
-        <div style="width:38px; height:38px; border-radius:50%; background:linear-gradient(135deg, var(--accent-primary), #2563eb);
-          display:flex; align-items:center; justify-content:center; color:#fff; font-weight:700; font-size:0.75rem; flex-shrink:0;">${initials}</div>
+        <div style="width:36px; height:36px; border-radius:50%; background:var(--bg-tertiary); border:1px solid var(--border-medium);
+          display:flex; align-items:center; justify-content:center; color:var(--text-secondary); font-weight:700; font-size:0.75rem; flex-shrink:0;">${initials}</div>
         <div style="flex:1; min-width:0;">
           <div style="font-weight:600; font-size:0.9rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--text-primary);">${escapeHTML(c.name || 'Unknown')}</div>
           <div style="font-size:0.78rem; color:var(--text-muted);">${escapeHTML(c.telephone || 'No phone')}</div>
         </div>
         <span class="material-icons" style="color:var(--text-muted); font-size:18px; flex-shrink:0;">chevron_right</span>
       `;
-      div.onmouseenter = () => { div.style.background = 'var(--bg-card)'; };
+      div.onmouseenter = () => { div.style.background = 'var(--bg-tertiary)'; };
       div.onmouseleave = () => { div.style.background = 'transparent'; };
 
       // Single click to select & open details
@@ -8185,23 +8737,22 @@ function showCustomerDetailsModal(customer) {
   const totalPaid = allPay.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
 
   info.innerHTML = `
-    <div style="text-align:center; margin-bottom:16px;">
-      <div style="width:64px; height:64px; border-radius:50%; background:linear-gradient(135deg, var(--accent-primary), #2563eb);
-        display:flex; align-items:center; justify-content:center; color:#fff; font-weight:700; font-size:1.4rem;
-        margin:0 auto 10px;">${initials}</div>
-      <h3 style="margin:0 0 2px;">${escapeHTML(customer.name || 'Unknown')}</h3>
-      <span style="font-size:0.85em; color:var(--text-muted);">${escapeHTML(customer.telephone || 'No phone')}</span>
-    </div>
-    <div style="background:var(--bg-tertiary); border-radius:var(--radius-md); padding:12px 16px; margin-bottom:12px;">
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:0.85em;">
-        <div><span style="color:var(--text-muted);">Address</span><br/><strong>${escapeHTML(customer.address || '—')}</strong></div>
-        <div><span style="color:var(--text-muted);">Email</span><br/><strong>${escapeHTML(customer.email || '—')}</strong></div>
-        <div><span style="color:var(--text-muted);">Reservations</span><br/><strong>${allRes.length}</strong></div>
-        <div><span style="color:var(--text-muted);">Total Paid</span><br/><strong>$${totalPaid.toFixed(2)}</strong></div>
+    <div style="display:flex; align-items:center; gap:14px; padding-bottom:14px; border-bottom:1px solid var(--border-light); margin-bottom:14px;">
+      <div style="width:44px; height:44px; border-radius:50%; background:var(--bg-tertiary); border:1px solid var(--border-medium);
+        display:flex; align-items:center; justify-content:center; color:var(--text-secondary); font-weight:700; font-size:1rem; flex-shrink:0;">${initials}</div>
+      <div>
+        <div style="font-size:1rem; font-weight:700; color:var(--text-primary);">${escapeHTML(customer.name || 'Unknown')}</div>
+        <div style="font-size:0.85em; color:var(--text-muted);">${escapeHTML(customer.telephone || 'No phone')}</div>
       </div>
     </div>
-    ${customer.idImageUrl ? `<div style="text-align:center; margin-bottom:8px;">
-      <img src="${customer.idImageUrl}" alt="ID" style="max-width:200px; max-height:120px; border-radius:8px; border:1px solid var(--border-light);"/>
+    <table style="width:100%; border-collapse:collapse; font-size:0.87em;">
+      <tr><td style="padding:5px 0; color:var(--text-muted); width:110px;">Address</td><td style="padding:5px 0; color:var(--text-primary);">${escapeHTML(customer.address || '---')}</td></tr>
+      <tr><td style="padding:5px 0; color:var(--text-muted);">Email</td><td style="padding:5px 0; color:var(--text-primary);">${escapeHTML(customer.email || '---')}</td></tr>
+      <tr><td style="padding:5px 0; color:var(--text-muted);">Reservations</td><td style="padding:5px 0; color:var(--text-primary);">${allRes.length}</td></tr>
+      <tr><td style="padding:5px 0; color:var(--text-muted);">Total Paid</td><td style="padding:5px 0; color:var(--text-primary);">$${totalPaid.toFixed(2)}</td></tr>
+    </table>
+    ${customer.idImageUrl ? `<div style="margin-top:12px;">
+      <img src="${customer.idImageUrl}" alt="ID" style="max-width:100%; max-height:130px; border-radius:6px; border:1px solid var(--border-light); display:block;"/>
     </div>` : ''}
   `;
 
@@ -8237,6 +8788,30 @@ function showCustomerDetailsModal(customer) {
     resBtn.parentNode.replaceChild(newResBtn, resBtn);
     newResBtn.addEventListener("click", () => {
       openCustomerReservations(customer.id);
+    });
+  }
+
+  // Delete Customer button
+  const delBtn = document.getElementById("deleteCustomerBtn");
+  if (delBtn) {
+    const newDelBtn = delBtn.cloneNode(true);
+    delBtn.parentNode.replaceChild(newDelBtn, delBtn);
+    newDelBtn.addEventListener("click", async () => {
+      const activeRes = (window._reservationsCache || []).filter(r => r.customerId === customer.id && !r.checkedOut);
+      if (activeRes.length > 0) {
+        alert('Cannot delete ' + (customer.name || 'this guest') + ' -- they have ' + activeRes.length + ' active reservation(s). Check them out first.');
+        return;
+      }
+      if (!confirm('Delete guest "' + (customer.name || 'Unknown') + '"?\n\nThis cannot be undone.')) return;
+      try {
+        await deleteDoc(doc(db, 'customers', customer.id));
+        customers = customers.filter(c => c.id !== customer.id);
+        ModalManager.close('customerDetailsModal');
+        alert('Guest deleted.');
+      } catch (err) {
+        console.error('Delete customer failed:', err);
+        alert('Failed to delete guest.');
+      }
     });
   }
 
@@ -8453,14 +9028,12 @@ function showReceiptDetailModal(payment, reservation) {
     const baseTotal = (parseFloat(reservation.rate) || 0) * nights;
     // Include balance adjustments
     const adjustments = reservation.balanceAdjustments || [];
-    const totalAdjustment = adjustments.reduce((sum, adj) => {
-      return sum + (adj.type === 'discount' ? -adj.amount : adj.amount);
-    }, 0);
+    const totalAdjustment = calcAdjustmentTotal(adjustments);
     totalDue = baseTotal + totalAdjustment;
-    const allPayments = window._allPaymentsCache || [];
     // Filter out voided payments
     const resPayments = allPayments.filter(p => p.reservationId === reservation.id && !p.voided);
-    totalPaid = resPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+    const actualPaid = resPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+    totalPaid = actualPaid + calcCreditTotal(reservation.balanceCredits);
     balance = Math.max(0, totalDue - totalPaid);
   }
   
@@ -8531,7 +9104,7 @@ function showReceiptDetailModal(payment, reservation) {
         <div><strong>Room:</strong></div><div>${reservation.roomNumber}</div>
         <div><strong>Check-In:</strong></div><div>${formatDateDMY(reservation.arrivalDate)}</div>
         <div><strong>Check-Out:</strong></div><div>${formatDateDMY(reservation.departureDate)}</div>
-        <div><strong>Total Due:</strong></div><div>$${totalDue.toFixed(2)}</div>
+        <div><strong>Total Cost:</strong></div><div>$${totalDue.toFixed(2)}</div>
         <div><strong>Total Paid:</strong></div><div style="color:#10b981;">$${totalPaid.toFixed(2)}</div>
         <div><strong>Balance:</strong></div><div style="color:${balance > 0 ? '#ef4444' : '#10b981'};">$${balance.toFixed(2)}</div>
       </div>
@@ -8581,9 +9154,7 @@ function showReceiptDetailModal(payment, reservation) {
           const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate);
           const baseTotal = (parseFloat(reservation.rate) || 0) * nights;
           const adjustments = reservation.balanceAdjustments || [];
-          const totalAdjustment = adjustments.reduce((sum, adj) => {
-            return sum + (adj.type === 'discount' ? -adj.amount : adj.amount);
-          }, 0);
+          const totalAdjustment = calcAdjustmentTotal(adjustments);
           const totalDue = baseTotal + totalAdjustment;
           
           // Determine new payment status
@@ -8838,7 +9409,7 @@ async function showInHouseGuestsForExtend() {
          onmouseout="this.style.borderColor='var(--border-light)'; this.style.background='var(--bg-tertiary)';">
         <div style="
           width:44px; height:44px; border-radius:50%;
-          background:linear-gradient(135deg, var(--accent-primary), #2563eb);
+          background:var(--accent-primary);
           display:flex; align-items:center; justify-content:center;
           color:white; font-weight:700; font-size:0.85rem; flex-shrink:0;
         ">${roomNum}</div>
@@ -9445,14 +10016,12 @@ document.getElementById("printReceiptsBtn")?.addEventListener("click", () => {
           }
           // Use ALL non-voided payments for this reservation (not just filtered batch)
           const resPayments = allPaymentsByRes[p.reservationId] || [];
-          const totalPaid = resPayments.reduce((sum, pay) => sum + parseFloat(pay.amount || 0), 0);
+          const totalPaid = resPayments.reduce((sum, pay) => sum + parseFloat(pay.amount || 0), 0) + calcCreditTotal(reservation.balanceCredits);
           // Use reservation.rate (not payment's rate) for consistent total
           const baseTotal = (parseFloat(reservation.rate) || parseFloat(p.rate) || 0) * nights;
           // Include balance adjustments
           const adjustments = reservation.balanceAdjustments || [];
-          const totalAdjustment = adjustments.reduce((sum, adj) => {
-            return sum + (adj.type === 'discount' ? -adj.amount : adj.amount);
-          }, 0);
+          const totalAdjustment = calcAdjustmentTotal(adjustments);
           const totalDue = baseTotal + totalAdjustment;
           let balance = Math.max(0, totalDue - totalPaid);
           if (isNaN(balance)) balance = 0;
@@ -9513,6 +10082,17 @@ document.getElementById("printReceiptsBtn")?.addEventListener("click", () => {
 {
   const printRegistrationFormBtn = document.getElementById("printRegistrationFormBtn");
   if (printRegistrationFormBtn) printRegistrationFormBtn.onclick = () => {
+    // Stamp exact print time on the form before printing
+    const printTimestampEl = document.getElementById("formPrintTimestamp");
+    if (printTimestampEl) {
+      const now = new Date();
+      const dd = String(now.getDate()).padStart(2, '0');
+      const mm = String(now.getMonth() + 1).padStart(2, '0');
+      const yyyy = now.getFullYear();
+      const hh = String(now.getHours()).padStart(2, '0');
+      const min = String(now.getMinutes()).padStart(2, '0');
+      printTimestampEl.textContent = `Printed: ${dd}/${mm}/${yyyy} ${hh}:${min}`;
+    }
     window.print();
     setTimeout(() => {
       document.getElementById("registrationFormPreviewModal").style.display = "none";
@@ -9669,14 +10249,12 @@ document.getElementById("generateReceiptsBtn")?.addEventListener("click", async 
       }
       // Use ALL non-voided payments for this reservation (not just filtered batch)
       const resPayments = allPaymentsByRes[p.reservationId] || [];
-      const totalPaid = resPayments.reduce((sum, pay) => sum + parseFloat(pay.amount || 0), 0);
+      const totalPaid = resPayments.reduce((sum, pay) => sum + parseFloat(pay.amount || 0), 0) + calcCreditTotal(reservation.balanceCredits);
       // Use reservation.rate (not payment's rate) for consistent total
       const baseTotal = (parseFloat(reservation.rate) || parseFloat(p.rate) || 0) * nights;
       // Include balance adjustments
       const adjustments = reservation.balanceAdjustments || [];
-      const totalAdjustment = adjustments.reduce((sum, adj) => {
-        return sum + (adj.type === 'discount' ? -adj.amount : adj.amount);
-      }, 0);
+      const totalAdjustment = calcAdjustmentTotal(adjustments);
       const totalDue = baseTotal + totalAdjustment;
       let balance = Math.max(0, totalDue - totalPaid);
       if (isNaN(balance)) balance = 0;
@@ -9719,6 +10297,62 @@ document.getElementById("generateReceiptsBtn")?.addEventListener("click", async 
 
   document.getElementById("printReceiptsModal").style.display = "none";
 });
+
+/**
+ * Build receipts array with accurate point-in-time "Balance After" for each payment.
+ * Uses the reservation's extension history to determine what the total cost was
+ * at the time of each payment, so early payments don't show inflated balances
+ * caused by later extensions.
+ */
+function buildReceiptsWithBalance(sortedPayments, reservation) {
+  const currentRate = parseFloat(reservation.rate || 0);
+  const arrivalDate = reservation.arrivalDate;
+  const adjustmentTotal = calcAdjustmentTotal(reservation.balanceAdjustments);
+
+  // Build a timeline of departure AND rate changes from extension history
+  const extensions = (reservation.history || [])
+    .filter(h => h.type === 'extended' && h.date && h.newDeparture)
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  // Determine the original departure (before any extensions)
+  const originalDeparture = extensions.length > 0
+    ? extensions[0].previousDeparture
+    : reservation.departureDate;
+
+  // Determine the original rate (before any extensions changed it)
+  const originalRate = (extensions.length > 0 && extensions[0].previousRate != null)
+    ? parseFloat(extensions[0].previousRate)
+    : currentRate;
+
+  let cumulativePaid = 0;
+  return sortedPayments.map(p => {
+    const paymentTime = DateUtils.normalizeTimestamp(p.timestamp) || '';
+
+    // Find the departure date AND rate that were active at this payment's time
+    let activeDeparture = originalDeparture;
+    let activeRate = originalRate;
+    for (const ext of extensions) {
+      if (ext.date <= paymentTime) {
+        activeDeparture = ext.newDeparture;
+        if (ext.rate != null) activeRate = parseFloat(ext.rate);
+      }
+    }
+
+    const nights = calculateSpecialNights(arrivalDate, activeDeparture);
+    const totalAtThisPoint = activeRate * nights + adjustmentTotal;
+    cumulativePaid += parseFloat(p.amount || 0);
+    const balanceAfter = Math.max(0, totalAtThisPoint - cumulativePaid);
+
+    return {
+      number: p.receiptNumber || "—",
+      date: p.timestamp ? formatDateDMY(p.timestamp) : "—",
+      amount: p.amount || "0.00",
+      method: p.method ? p.method.charAt(0).toUpperCase() + p.method.slice(1) : 'N/A',
+      balanceAfter: balanceAfter.toFixed(2),
+    };
+  });
+}
+
 //Generate FORM FUNCTION
 function buildRegistrationFormHTML(reservation, customer, croppedImageDataURL, paymentSummary) {
   const room = reservation.roomNumber;
@@ -9728,6 +10362,12 @@ function buildRegistrationFormHTML(reservation, customer, croppedImageDataURL, p
   const totalDue = paymentSummary.totalDue.toFixed(2);
   const balance = paymentSummary.balanceRemaining.toFixed(2);
   const rate = parseFloat(reservation.rate || 0);
+  const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate);
+  const printDate = formatDateTimeDMY(new Date().toISOString());
+  
+  // Credit entries to show on form (from reservation.balanceCredits)
+  const creditsOnForm = (reservation.balanceCredits || []).filter(c => c.showOnForm !== false);
+  const creditsTotalForForm = creditsOnForm.reduce((s, c) => s + parseFloat(c.amount || 0), 0);
   
   // Get latest receipt info
   const latestReceipt = paymentSummary.receipts.length > 0 ? paymentSummary.receipts[paymentSummary.receipts.length - 1] : null;
@@ -9745,102 +10385,125 @@ function buildRegistrationFormHTML(reservation, customer, croppedImageDataURL, p
 
   // ============================================
   // SINGLE PAGE: Guest Registration + Tear-off Receipt
+  // Dynamically compact when many receipts exist
   // ============================================
+  const receiptCount = paymentSummary.receipts.length;
+  const hasCredits = creditsOnForm.length > 0;
+  const hasNote = !!reservation.note;
+  // Compact when content is heavy: 4+ receipts, or 3+ receipts with credits/notes
+  const isCompact = receiptCount > 3 || (receiptCount > 2 && (hasCredits || hasNote));
+  const ledgerFont = receiptCount > 8 ? '7' : receiptCount > 5 ? '8' : isCompact ? '9' : '11';
+  const ledgerPad = receiptCount > 5 ? '1px 2px' : isCompact ? '1px 3px' : '2px 3px';
   
   const page1 = `
-    <div class="registration-form-page" style="font-family:Arial,sans-serif; font-size:13px; line-height:1.35; color:#000; background:white; padding:10px 18px; box-sizing:border-box; max-width:100%;">
+    <div class="registration-form-page" style="font-family:Arial,sans-serif; font-size:${isCompact ? '11' : '13'}px; line-height:${isCompact ? '1.2' : '1.3'}; color:#000; background:white; padding:${isCompact ? '4px 14px' : '10px 18px'}; box-sizing:border-box; max-width:100%;">
       
       <!-- HEADER -->
-      <h2 style="text-align:center; margin:0 0 8px 0; font-size:22px; border-bottom:2px solid #2a4d7a; padding-bottom:6px;">
+      <h2 style="text-align:center; margin:0 0 ${isCompact ? '3' : '8'}px 0; font-size:${isCompact ? '17' : '22'}px; border-bottom:2px solid #2a4d7a; padding-bottom:${isCompact ? '2' : '6'}px;">
         Glimbaro Guest House - Registration Form
       </h2>
 
       <!-- GUEST INFO + ID IMAGE -->
-      <div style="display:flex; justify-content:space-between; margin-bottom:10px; gap:12px;">
-        <div style="flex:1;">
-          <table style="width:100%; border-collapse:collapse; font-size:14px;">
+      <div style="display:flex; justify-content:space-between; margin-bottom:${isCompact ? '4' : '10'}px; gap:12px;">
+        <div style="flex:3; min-width:0;">
+          <table style="width:100%; border-collapse:collapse; font-size:${isCompact ? '11' : '13'}px;">
             <tr>
-              <td style="padding:4px 0; font-weight:bold; width:70px;">Guest:</td>
-              <td style="padding:4px 0; border-bottom:1px solid #ccc; font-size:15px;">${escapeHTML(customer.name)}</td>
+              <td style="padding:${isCompact ? '2' : '4'}px 0; font-weight:bold; width:65px;">Guest:</td>
+              <td style="padding:${isCompact ? '2' : '4'}px 0; border-bottom:1px solid #ccc; font-size:${isCompact ? '12' : '15'}px;">${escapeHTML(customer.name)}</td>
             </tr>
             <tr>
-              <td style="padding:4px 0; font-weight:bold;">Address:</td>
-              <td style="padding:4px 0; border-bottom:1px solid #ccc;">${escapeHTML(customer.address)}</td>
+              <td style="padding:${isCompact ? '2' : '4'}px 0; font-weight:bold;">Address:</td>
+              <td style="padding:${isCompact ? '2' : '4'}px 0; border-bottom:1px solid #ccc;">${escapeHTML(customer.address)}</td>
             </tr>
             <tr>
-              <td style="padding:4px 0; font-weight:bold;">Phone:</td>
-              <td style="padding:4px 0; border-bottom:1px solid #ccc;">${escapeHTML(customer.telephone)}</td>
+              <td style="padding:${isCompact ? '2' : '4'}px 0; font-weight:bold;">Phone:</td>
+              <td style="padding:${isCompact ? '2' : '4'}px 0; border-bottom:1px solid #ccc;">${escapeHTML(customer.telephone)}</td>
             </tr>
             <tr>
-              <td style="padding:4px 0; font-weight:bold;">Email:</td>
-              <td style="padding:4px 0; border-bottom:1px solid #ccc;">${escapeHTML(customer.email || 'N/A')}</td>
+              <td style="padding:${isCompact ? '2' : '4'}px 0; font-weight:bold;">Email:</td>
+              <td style="padding:${isCompact ? '2' : '4'}px 0; border-bottom:1px solid #ccc;">${escapeHTML(customer.email || 'N/A')}</td>
             </tr>
             <tr>
-              <td style="padding:4px 0; font-weight:bold;">Room:</td>
-              <td style="padding:4px 0; border-bottom:1px solid #ccc; font-size:17px; font-weight:bold; color:#2a4d7a;">${room}</td>
+              <td style="padding:${isCompact ? '2' : '4'}px 0; font-weight:bold;">Room:</td>
+              <td style="padding:${isCompact ? '2' : '4'}px 0; border-bottom:1px solid #ccc; font-size:${isCompact ? '14' : '17'}px; font-weight:bold; color:#2a4d7a;">${room}</td>
             </tr>
           </table>
         </div>
-        <div style="width:200px; min-width:200px; border:2px solid #2a4d7a; border-radius:6px; height:140px; display:flex; align-items:center; justify-content:center; overflow:hidden; background:#f5f5f5;">
+        <div style="flex:2; min-width:0; border:2px solid #2a4d7a; border-radius:6px; height:${isCompact ? '110' : '145'}px; display:flex; align-items:center; justify-content:center; overflow:hidden; background:#f5f5f5;">
           ${croppedImageDataURL ? `<img src="${croppedImageDataURL}" alt="Guest ID" style="max-width:100%; max-height:100%; object-fit:contain;" />` : '<span style="color:#999; font-size:14px;">No ID</span>'}
         </div>
       </div>
 
       <!-- CHECK-IN/OUT TIMES -->
-      <div style="display:flex; gap:10px; margin-bottom:8px;">
-        <div style="flex:1; background:#e3f2fd; padding:8px; border-radius:6px; border:1px solid #2196f3; text-align:center;">
-          <div style="font-size:11px; color:#666; font-weight:bold;">SCHEDULED CHECK-IN</div>
-          <div style="font-size:15px; font-weight:bold; margin-top:2px;">${arrival} @ 3:00 PM</div>
-          ${isCheckedIn ? `<div style="font-size:11px; color:#28a745; font-weight:bold; margin-top:2px;">✓ CHECKED IN: ${checkedInTime}</div>` : ''}
+      <div style="display:flex; gap:${isCompact ? '6' : '10'}px; margin-bottom:${isCompact ? '3' : '8'}px;">
+        <div style="flex:1; background:#e3f2fd; padding:${isCompact ? '3px 4px' : '8px'}; border-radius:6px; border:1px solid #2196f3; text-align:center;">
+          <div style="font-size:${isCompact ? '8' : '11'}px; color:#666; font-weight:bold;">SCHEDULED CHECK-IN</div>
+          <div style="font-size:${isCompact ? '11' : '15'}px; font-weight:bold; margin-top:2px;">${arrival} @ 3:00 PM</div>
+          ${isCheckedIn ? `<div style="font-size:${isCompact ? '8' : '11'}px; color:#28a745; font-weight:bold; margin-top:1px;">CHECKED IN: ${checkedInTime}</div>` : ''}
         </div>
-        <div style="flex:1; background:#fce4ec; padding:8px; border-radius:6px; border:1px solid #e91e63; text-align:center;">
-          <div style="font-size:11px; color:#666; font-weight:bold;">SCHEDULED CHECK-OUT</div>
-          <div style="font-size:15px; font-weight:bold; margin-top:2px;">${departure} @ 1:00 PM</div>
-          ${isCheckedOut ? `<div style="font-size:11px; color:#dc3545; font-weight:bold; margin-top:2px;">✓ CHECKED OUT: ${checkedOutTime}</div>` : ''}
+        <div style="flex:1; background:#fce4ec; padding:${isCompact ? '3px 4px' : '8px'}; border-radius:6px; border:1px solid #e91e63; text-align:center;">
+          <div style="font-size:${isCompact ? '8' : '11'}px; color:#666; font-weight:bold;">SCHEDULED CHECK-OUT</div>
+          <div style="font-size:${isCompact ? '11' : '15'}px; font-weight:bold; margin-top:2px;">${departure} @ 1:00 PM</div>
+          ${isCheckedOut ? `<div style="font-size:${isCompact ? '8' : '11'}px; color:#dc3545; font-weight:bold; margin-top:1px;">CHECKED OUT: ${checkedOutTime}</div>` : ''}
         </div>
       </div>
 
       <!-- PAYMENT SUMMARY WITH RUNNING BALANCE -->
-      <div style="background:#f8f9fa; padding:6px 8px; border-radius:6px; border:1px solid #dee2e6; margin-bottom:6px;">
-        <div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:4px; padding-bottom:3px; border-bottom:1px solid #dee2e6;">
-          <div><strong>Rate:</strong> $${rate.toFixed(2)}/night</div>
-          <div><strong>Total Due:</strong> $${totalDue}</div>
+      <div style="background:#f8f9fa; padding:${isCompact ? '3px 5px' : '6px 8px'}; border-radius:6px; border:1px solid #dee2e6; margin-bottom:${isCompact ? '3' : '6'}px;">
+        <div style="display:flex; justify-content:space-between; font-size:${isCompact ? '10' : '12'}px; margin-bottom:3px; padding-bottom:2px; border-bottom:1px solid #dee2e6;">
+          <div><strong>Rate:</strong> $${rate.toFixed(2)}/night × ${nights} night${nights !== 1 ? 's' : ''}</div>
+          <div><strong>Total Cost:</strong> $${totalDue}</div>
           <div><strong>Current Balance:</strong> <span style="color:${parseFloat(balance) > 0 ? '#dc3545' : '#28a745'}; font-weight:bold;">$${balance}</span></div>
         </div>
         
-        <!-- PAYMENT LEDGER - Each receipt with running balance -->
+        <!-- PAYMENT LEDGER -->
         ${paymentSummary.receipts.length > 0 ? `
-        <table style="width:100%; font-size:11px; border-collapse:collapse;">
+        <table style="width:100%; font-size:${ledgerFont}px; border-collapse:collapse;">
           <tr style="background:#2a4d7a; color:#fff;">
-            <th style="padding:3px; text-align:left;">Receipt #</th>
-            <th style="padding:3px; text-align:left;">Date</th>
-            <th style="padding:3px; text-align:center;">Method</th>
-            <th style="padding:3px; text-align:right;">Paid</th>
-            <th style="padding:3px; text-align:right;">Balance After</th>
+            <th style="padding:${ledgerPad}; text-align:left;">Receipt #</th>
+            <th style="padding:${ledgerPad}; text-align:left;">Date</th>
+            <th style="padding:${ledgerPad}; text-align:center;">Method</th>
+            <th style="padding:${ledgerPad}; text-align:right;">Paid</th>
+            <th style="padding:${ledgerPad}; text-align:right;">Balance After</th>
           </tr>
-          ${(() => {
-            let runningBal = parseFloat(totalDue);
-            return paymentSummary.receipts.map(r => {
-              const paidAmt = parseFloat(r.amount);
-              runningBal = Math.max(0, runningBal - paidAmt);
-              return `
+          ${paymentSummary.receipts.map(r => {
+            const paidAmt = parseFloat(r.amount);
+            const bal = parseFloat(r.balanceAfter || 0);
+            return `
               <tr style="border-bottom:1px solid #dee2e6;">
-                <td style="padding:2px 3px; font-weight:bold;">${r.number}</td>
-                <td style="padding:2px 3px;">${r.date}</td>
-                <td style="padding:2px 3px; text-align:center; text-transform:capitalize;">${r.method}</td>
-                <td style="padding:2px 3px; text-align:right; color:#28a745; font-weight:bold;">$${paidAmt.toFixed(2)}</td>
-                <td style="padding:2px 3px; text-align:right; color:${runningBal > 0 ? '#dc3545' : '#28a745'}; font-weight:bold;">$${runningBal.toFixed(2)}</td>
+                <td style="padding:${ledgerPad}; font-weight:bold;">${r.number}</td>
+                <td style="padding:${ledgerPad};">${r.date}</td>
+                <td style="padding:${ledgerPad}; text-align:center; text-transform:capitalize;">${r.method}</td>
+                <td style="padding:${ledgerPad}; text-align:right; color:#28a745; font-weight:bold;">$${paidAmt.toFixed(2)}</td>
+                <td style="padding:${ledgerPad}; text-align:right; color:${bal > 0 ? '#dc3545' : '#28a745'}; font-weight:bold;">$${bal.toFixed(2)}</td>
               </tr>`;
-            }).join('');
-          })()}
+          }).join('')}
         </table>
-        ` : '<div style="font-size:11px; color:#999; text-align:center;">No payments recorded yet</div>'}
+        ` : `<div style="font-size:11px; color:#999; text-align:center;">No payments recorded yet</div>`}
+        
+        ${creditsOnForm.length > 0 ? `
+        <div style="margin-top:${isCompact ? '3' : '5'}px; padding:${isCompact ? '2px 4px' : '4px 6px'}; background:#e8f4fd; border:1px solid #90caf9; border-radius:4px;">
+          <div style="font-size:${isCompact ? '9' : '11'}px; font-weight:bold; color:#2a4d7a; margin-bottom:2px;">Credits Applied:</div>
+          ${creditsOnForm.map(c => `
+            <div style="display:flex; justify-content:space-between; font-size:${isCompact ? '9' : '11'}px; padding:1px 0; border-bottom:1px dotted #ccc;">
+              <span style="color:#555;">${escapeHTML(c.reason)}${c.timestamp ? ` <span style="font-size:0.8em;color:#999;">(${formatDateDMY(c.timestamp)})</span>` : ''}</span>
+              <span style="color:#2a4d7a; font-weight:bold;">$${parseFloat(c.amount).toFixed(2)}</span>
+            </div>
+          `).join('')}
+          <div style="text-align:right; font-size:${isCompact ? '9' : '11'}px; font-weight:bold; color:#2a4d7a; margin-top:2px;">Total Credits: $${creditsTotalForForm.toFixed(2)}</div>
+        </div>
+        ` : ''}
       </div>
 
       <!-- IMPORTANT INFORMATION -->
-      <div style="padding:6px 8px; background:#fff3cd; border:1px solid #ffc107; border-radius:6px; margin-bottom:6px;">
-        <h4 style="margin:0 0 4px 0; font-size:13px; color:#856404;">⚠ Important Information</h4>
-        <ul style="margin:0; padding-left:18px; font-size:12px; color:#856404; line-height:1.4;">
+      <div style="padding:${isCompact ? '3px 5px' : '6px 8px'}; background:#fff3cd; border:1px solid #ffc107; border-radius:6px; margin-bottom:${isCompact ? '3' : '6'}px;">
+        ${isCompact ? `
+        <div style="font-size:9px; color:#856404; line-height:1.3;">
+          <strong>Important:</strong> Check-in: <strong>3PM</strong> | Check-out: <strong>1PM</strong> | <strong>$10 USD</strong> security deposit (returned w/ keys) | Guests responsible for damages/missing items | Management not liable for valuables | Rates paid in advance | Extra persons: <strong>$10/person/night</strong> | Late checkout: <strong>20%</strong>/hr | <strong>No refunds</strong>
+        </div>
+        ` : `
+        <h4 style="margin:0 0 2px 0; font-size:13px; color:#856404;">Important Information</h4>
+        <ul style="margin:0; padding-left:16px; font-size:12px; color:#856404; line-height:1.5;">
           <li>Check-in: <strong>3:00 PM</strong> | Check-out: <strong>1:00 PM</strong></li>
           <li>Guests are responsible for any damages or missing items</li>
           <li><strong>$10 USD</strong> security deposit required (returned when keys are returned)</li>
@@ -9848,73 +10511,81 @@ function buildRegistrationFormHTML(reservation, customer, croppedImageDataURL, p
           <li>All rates must be paid in advance | Extra persons: <strong>$10 USD</strong>/person/night</li>
           <li>Late checkout fee: <strong>20%</strong> of room rate per hour | <strong>No refunds</strong></li>
         </ul>
+        `}
       </div>
 
+      ${reservation.note ? `
+      <div style="padding:${isCompact ? '2px 5px' : '4px 8px'}; background:#f8f9fa; border:1px solid #dee2e6; border-radius:4px; margin-bottom:${isCompact ? '3' : '6'}px;">
+        <div style="font-size:${isCompact ? '9' : '11'}px; font-weight:bold; color:#333; margin-bottom:1px;">Notes:</div>
+        <div style="font-size:${isCompact ? '9' : '11'}px; color:#555;">${escapeHTML(reservation.note)}</div>
+      </div>
+      ` : ''}
+
       <!-- SIGNATURES -->
-      <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+      <div style="display:flex; justify-content:space-between; margin-bottom:${isCompact ? '3' : '6'}px;">
         <div style="width:45%;">
-          <p style="margin:0 0 4px 0; font-weight:bold; font-size:13px;">Guest Signature:</p>
-          <div style="border-bottom:2px solid #000; height:28px;"></div>
-          <p style="margin:3px 0 0 0; font-size:11px; color:#666;">Date: ______________</p>
+          <p style="margin:0 0 2px 0; font-weight:bold; font-size:${isCompact ? '10' : '13'}px;">Guest Signature:</p>
+          <div style="border-bottom:2px solid #000; height:${isCompact ? '18' : '28'}px;"></div>
+          <p style="margin:2px 0 0 0; font-size:${isCompact ? '8' : '11'}px; color:#666;">Date: ______________</p>
         </div>
         <div style="width:45%;">
-          <p style="margin:0 0 4px 0; font-weight:bold; font-size:13px;">Receptionist:</p>
-          <div style="border-bottom:2px solid #000; height:28px;"></div>
-          <p style="margin:3px 0 0 0; font-size:11px; color:#666;">Date: ______________</p>
+          <p style="margin:0 0 2px 0; font-weight:bold; font-size:${isCompact ? '10' : '13'}px;">Receptionist:</p>
+          <div style="border-bottom:2px solid #000; height:${isCompact ? '18' : '28'}px;"></div>
+          <p style="margin:2px 0 0 0; font-size:${isCompact ? '8' : '11'}px; color:#666;">Date: ______________</p>
         </div>
       </div>
 
       <!-- FOOTER -->
-      <div style="text-align:center; padding:5px 0; border-top:1px solid #ccc; font-size:11px; color:#666;">
+      <div style="text-align:center; padding:${isCompact ? '2' : '5'}px 0; border-top:1px solid #ccc; font-size:${isCompact ? '8' : '11'}px; color:#666;">
         <strong>Glimbaro Guest House</strong> | Cayon Street, PO Box 457, Basseterre, St. Kitts | Tel: (869) 663-0777 | (869) 465-2935 | (869) 465-1786
+        <br><span style="font-size:${isCompact ? '7' : '9'}px; color:#aaa;">Printed: ${printDate}</span>
       </div>
 
       <!-- TEAR-OFF LINE -->
-      <div style="border-top:2px dashed #000; margin:6px 0; position:relative;">
-        <span style="position:absolute; top:-8px; left:15px; background:white; padding:0 8px; font-size:11px; font-weight:bold;">✂ TEAR HERE - GUEST COPY</span>
+      <div style="border-top:2px dashed #000; margin:${isCompact ? '3' : '6'}px 0; position:relative;">
+        <span style="position:absolute; top:-8px; left:15px; background:white; padding:0 8px; font-size:${isCompact ? '8' : '11'}px; font-weight:bold;">TEAR HERE - GUEST COPY</span>
       </div>
 
       <!-- TEAR-OFF RECEIPT -->
-      <div style="border:2px solid #2a4d7a; border-radius:6px; padding:6px 8px; background:#f8f9fa;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+      <div style="border:2px solid #2a4d7a; border-radius:6px; padding:${isCompact ? '3px 5px' : '6px 8px'}; background:#f8f9fa;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:${isCompact ? '2' : '4'}px;">
           <div>
-            <strong style="font-size:15px; color:#2a4d7a;">Glimbaro Guest House</strong>
-            <div style="font-size:10px; color:#666;">Cayon St, Basseterre | (869) 663-0777</div>
+            <strong style="font-size:${isCompact ? '12' : '15'}px; color:#2a4d7a;">Glimbaro Guest House</strong>
+            <div style="font-size:${isCompact ? '8' : '10'}px; color:#666;">Cayon St, Basseterre | (869) 663-0777</div>
           </div>
-          <div style="font-size:13px; font-weight:bold; color:#2a4d7a; text-align:right;">Payment Receipt<br><span style="font-size:11px; font-weight:normal;">Room ${room}</span></div>
+          <div style="font-size:${isCompact ? '10' : '13'}px; font-weight:bold; color:#2a4d7a; text-align:right;">Payment Receipt<br><span style="font-size:${isCompact ? '9' : '11'}px; font-weight:normal;">Room ${room}</span></div>
         </div>
         
-        <div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:4px;">
+        <div style="display:flex; justify-content:space-between; font-size:${isCompact ? '9' : '12'}px; margin-bottom:${isCompact ? '2' : '4'}px;">
           <div><strong>Guest:</strong> ${escapeHTML(customer.name)}</div>
           <div><strong>Room:</strong> ${room}</div>
           <div><strong>Date:</strong> ${receiptDate}</div>
         </div>
         
-        <div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:4px;">
+        <div style="display:flex; justify-content:space-between; font-size:${isCompact ? '9' : '12'}px; margin-bottom:${isCompact ? '2' : '4'}px;">
           <div><strong>In:</strong> ${arrival} @ 3PM</div>
           <div><strong>Out:</strong> ${departure} @ 1PM</div>
-          <div><strong>Rate:</strong> $${rate.toFixed(2)}/night</div>
+          <div><strong>Rate:</strong> $${rate.toFixed(2)}/night × ${nights}</div>
         </div>
         
-        <!-- PAYMENT LEDGER - Each receipt with amount paid and balance after -->
+        <!-- PAYMENT LEDGER -->
         ${paymentSummary.receipts.length > 0 ? `
-        <div style="margin:4px 0; padding:3px; background:#fff; border:1px solid #dee2e6; border-radius:4px;">
-          <table style="width:100%; font-size:11px; border-collapse:collapse;">
+        <div style="margin:${isCompact ? '1' : '4'}px 0; padding:2px; background:#fff; border:1px solid #dee2e6; border-radius:4px;">
+          <table style="width:100%; font-size:${ledgerFont}px; border-collapse:collapse;">
             <tr style="background:#2a4d7a; color:#fff;">
-              <th style="padding:2px 3px; text-align:left;">Receipt</th>
-              <th style="padding:2px 3px; text-align:right;">Paid</th>
-              <th style="padding:2px 3px; text-align:right;">Balance</th>
+              <th style="padding:${ledgerPad}; text-align:left;">Receipt</th>
+              <th style="padding:${ledgerPad}; text-align:right;">Paid</th>
+              <th style="padding:${ledgerPad}; text-align:right;">Balance</th>
             </tr>
             ${(() => {
-              let runningBal = parseFloat(totalDue);
               return paymentSummary.receipts.map(r => {
                 const paidAmt = parseFloat(r.amount);
-                runningBal = Math.max(0, runningBal - paidAmt);
+                const bal = parseFloat(r.balanceAfter || 0);
                 return `
                 <tr style="border-bottom:1px dotted #ccc;">
-                  <td style="padding:2px 3px;"><strong>#${r.number}</strong> <span style="font-size:9px;color:#666;">(${r.date})</span></td>
-                  <td style="padding:2px 3px; text-align:right; color:#28a745; font-weight:bold;">$${paidAmt.toFixed(2)}</td>
-                  <td style="padding:2px 3px; text-align:right; color:${runningBal > 0 ? '#dc3545' : '#28a745'}; font-weight:bold;">$${runningBal.toFixed(2)}</td>
+                  <td style="padding:${ledgerPad};"><strong>#${r.number}</strong> <span style="font-size:${isCompact ? '7' : '9'}px;color:#666;">(${r.date})</span></td>
+                  <td style="padding:${ledgerPad}; text-align:right; color:#28a745; font-weight:bold;">$${paidAmt.toFixed(2)}</td>
+                  <td style="padding:${ledgerPad}; text-align:right; color:${bal > 0 ? '#dc3545' : '#28a745'}; font-weight:bold;">$${bal.toFixed(2)}</td>
                 </tr>`;
               }).join('');
             })()}
@@ -9922,15 +10593,23 @@ function buildRegistrationFormHTML(reservation, customer, croppedImageDataURL, p
         </div>
         ` : ''}
         
+        ${creditsOnForm.length > 0 ? `
+        <div style="margin:${isCompact ? '1' : '3'}px 0; font-size:${isCompact ? '8' : '10'}px; background:#e8f4fd; padding:${isCompact ? '2px 4px' : '3px 5px'}; border-radius:3px; border:1px solid #90caf9;">
+          <strong style="color:#2a4d7a;">Credits:</strong>
+          ${creditsOnForm.map(c => `<span style="margin-left:6px;">${escapeHTML(c.reason)}: <strong>$${parseFloat(c.amount).toFixed(2)}</strong></span>`).join(' |')}
+        </div>
+        ` : ''}
+        
         <!-- FINAL TOTALS -->
-        <div style="display:flex; justify-content:space-between; padding:4px 6px; background:#e8f5e9; border-radius:4px; font-size:12px;">
-          <div><strong>Total Due:</strong> $${totalDue}</div>
+        <div style="display:flex; justify-content:space-between; padding:${isCompact ? '2px 4px' : '4px 6px'}; background:#e8f5e9; border-radius:4px; font-size:${isCompact ? '9' : '12'}px;">
+          <div><strong>Total Cost:</strong> $${totalDue}</div>
           <div><strong>Balance:</strong> <span style="color:${parseFloat(balance) > 0 ? '#dc3545' : '#28a745'}; font-weight:bold;">$${balance}</span></div>
         </div>
-        ${isCheckedIn ? `<div style="text-align:center; margin-top:3px; font-size:11px; color:#28a745; font-weight:bold;">✓ Checked In: ${checkedInTime}</div>` : ''}
+        ${isCheckedIn ? `<div style="text-align:center; margin-top:${isCompact ? '1' : '3'}px; font-size:${isCompact ? '8' : '11'}px; color:#28a745; font-weight:bold;">Checked In: ${checkedInTime}</div>` : ''}
         
-        <div style="text-align:center; margin-top:4px; font-size:10px; color:#666;">
+        <div style="text-align:center; margin-top:${isCompact ? '1' : '4'}px; font-size:${isCompact ? '7' : '10'}px; color:#666;">
           Thank you for staying with us! | Tel: (869) 663-0777 | (869) 465-2936 | (869) 465-1786
+          <br><span style="font-size:${isCompact ? '6' : '8'}px;color:#aaa;">Printed: ${printDate}</span>
         </div>
       </div>
 
@@ -10010,7 +10689,7 @@ function buildRegistrationFormHTML(reservation, customer, croppedImageDataURL, p
 
         <div style="margin-top:20px; padding:16px; background:#f8f9fa; border-radius:6px; border:2px solid #2a4d7a;">
           <div style="display:flex; justify-content:space-around; font-size:16px; font-weight:bold;">
-            <div>Total Due:  <span style="color:#2a4d7a;">$${totalDue}</span></div>
+            <div>Total Cost:  <span style="color:#2a4d7a;">$${totalDue}</span></div>
             <div>Total Paid: <span style="color:#28a745;">$${totalPaid}</span></div>
             <div>Balance: <span style="color: ${parseFloat(balance) > 0 ? '#dc3545' : '#28a745'};">$${balance}</span></div>
           </div>
@@ -10092,12 +10771,12 @@ function showCheckInConfirmationPopup(reservation, customer, receiptNumber, amou
         actualCheckInTime: actualCheckInTime
       }, 'reservation', reservation.id);
       
-      alert(`✅ Guest checked in at ${now.toLocaleTimeString()}`);
+      alert(`Guest checked in at ${now.toLocaleTimeString()}`);
       ModalManager.close('checkInConfirmationModal');
       ModalManager.open('registrationPromptModal');
     } catch (err) {
       console.error("Check-in error:", err);
-      alert("❌ Failed to record check-in time.");
+      alert("Failed to record check-in time.");
     }
   };
 
@@ -10188,7 +10867,7 @@ function showSMSConfirmationPopup(reservation, customer, receiptNumber, amountPa
  */
 function generateInvoiceHTML(customer, reservation, selectedPayments, totalCost) {
   // Calculate totals
-  const totalPaid = selectedPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+  const totalPaid = selectedPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) + calcCreditTotal(reservation?.balanceCredits);
   const balance = Math.max(0, totalCost - totalPaid);
 
   // Build payment rows HTML
@@ -10281,7 +10960,7 @@ function calculateSpecialNightsForExtension(currentDeparture, newDeparture, offe
 {
   const summaryBtn = document.getElementById("summaryBtn");
   if (summaryBtn) summaryBtn.onclick = () => {
-    ModalManager.open('summaryModal');
+    window.location.href = 'reports.html';
   };
 
   const closeSummaryModal = document.getElementById("closeSummaryModal");
@@ -10355,220 +11034,263 @@ function calculateSpecialNightsForExtension(currentDeparture, newDeparture, offe
 
 /**
  * Load Summary Report
- * Generates a table of reservations filtered by date range or outstanding balance
+ * Generates a table of reservations filtered by date range or outstanding balance.
+ *
+ * CONSISTENCY RULES:
+ * - Voided payments are ALWAYS excluded (both p.voided AND p.qbSyncStatus === 'voided')
+ * - Every row shows the FULL reservation financials (Total Due / Total Paid / Balance)
+ * - Footer totals are the EXACT sum of every visible row's columns
+ * - Total Due - Total Paid = Outstanding Balance (always)
+ * - Filter logic determines WHICH reservations appear, not partial amounts
+ *
+ * FILTER BEHAVIOR:
+ * - day         : reservations created today OR that received a payment today
+ * - week        : reservations whose stay overlaps the current week
+ * - month       : reservations whose stay overlaps the current month
+ * - lastMonth   : reservations whose stay overlaps last month
+ * - custom      : reservations whose stay overlaps the custom date range
+ * - outstanding : reservations with a balance > 0
  */
 async function loadSummary(startDate, endDate, range) {
   const tbody = document.querySelector("#summaryTable tbody");
   if (!tbody) return;
-  
-  tbody.innerHTML = "";
-  let totalEarnings = 0;
-  let totalOutstanding = 0;
 
-    /**
-   * Convert date to local date string (YYYY-MM-DD)
-   * @param {Date|string} d - Date object or string
-   * @returns {string|null} - Formatted date string or null
-   */
+  tbody.innerHTML = '<tr><td colspan="16" style="text-align:center;padding:24px;color:var(--text-muted);">Loading report...</td></tr>';
+
+  // ─── DATE HELPERS ─────────────────────────────────────────────────────────
   const toLocalDateStr = (d) => {
     if (!d) return null;
     const date = d instanceof Date ? d : new Date(d);
     if (isNaN(date.getTime())) return null;
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
+    return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
   };
 
-  /**
-   * Parse various timestamp formats to Date object
-   * @param {*} ts - Timestamp (Firestore Timestamp, Date, or string)
-   * @returns {Date|null} - Date object or null
-   */
   const parseTimestamp = (ts) => {
     if (!ts) return null;
     if (typeof ts.toDate === 'function') return ts.toDate();
     if (ts instanceof Date) return ts;
-    if (typeof ts === 'string') return new Date(ts);
+    if (typeof ts === 'string') { const d = new Date(ts); return isNaN(d.getTime()) ? null : d; }
     return null;
   };
 
-  // Load employee names for proper display
+  const startStr    = toLocalDateStr(startDate);
+  const endStr      = toLocalDateStr(endDate);
+  const isDateRange = !!(startStr && endStr);
+
+  // ─── FRESH PAYMENT DATA ───────────────────────────────────────────────────
+  // Always fetch from Firestore — financial reports must be accurate, never stale.
+  let allPayments = [];
+  try {
+    const paySnap = await getDocs(collection(db, 'payments'));
+    allPayments = paySnap.docs.map(d => ({ id: d.id, ...d.data() }));
+    window._allPaymentsCache = allPayments; // keep cache in sync
+  } catch (fetchErr) {
+    console.warn('[Report] Fresh payment fetch failed, using cache:', fetchErr);
+    allPayments = window._allPaymentsCache || [];
+  }
+
+  // ─── TRIPLE VOID CHECK ────────────────────────────────────────────────────
+  // Exclude a payment if ANY of these three flags marks it as voided.
+  const validPayments = allPayments.filter(p =>
+    !p.voided &&
+    p.qbSyncStatus !== 'voided' &&
+    p.status       !== 'voided'
+  );
+
+  // ─── RESERVATIONS ─────────────────────────────────────────────────────────
+  const reservations = window._reservationsCache || await loadReservations();
+
+  // ─── EMPLOYEE NAMES ───────────────────────────────────────────────────────
   const employeeNames = {};
   try {
-    const employeesSnapshot = await getDocs(collection(db, 'employees'));
-    employeesSnapshot.forEach(doc => {
-      const data = doc.data();
-      employeeNames[doc.id] = data.name || 'Unknown';
-    });
-  } catch (err) {
-    console.warn('Could not load employee names:', err);
-  }
+    const empSnap = await getDocs(collection(db, 'employees'));
+    empSnap.forEach(d => { employeeNames[d.id] = d.data().name || 'Unknown'; });
+  } catch (err) { console.warn('[Report] Could not load employee names:', err); }
 
-  // Load data from cache
-  const reservations = window._reservationsCache || await loadReservations();
-  const payments = (window._allPaymentsCache || []).filter(p => !p.voided);
-  
-  const startStr = toLocalDateStr(startDate);
-  const endStr = toLocalDateStr(endDate);
+  // ─── INDEX PAYMENTS (O(n) once, O(1) per reservation lookup) ─────────────
+  // allTimePayByRes : reservationId -> all valid non-voided payments ever
+  // periodPayByRes  : reservationId -> valid payments dated within startStr..endStr
+  const allTimePayByRes = new Map();
+  const periodPayByRes  = new Map();
 
-  Logger.debug('📊 Loading summary:', { range, startStr, endStr });
+  for (const p of validPayments) {
+    if (!p.reservationId) continue;
 
-  // Find payments in period for "day" filtering
-  const periodPaymentResIds = new Set();
-  if (range === 'day' && startStr) {
-    payments.forEach(p => {
-      const payDate = parseTimestamp(p.timestamp);
-      if (payDate) {
-        const payDateStr = toLocalDateStr(payDate);
-        if (payDateStr === startStr && p.reservationId) {
-          periodPaymentResIds.add(p.reservationId);
-        }
+    if (!allTimePayByRes.has(p.reservationId)) allTimePayByRes.set(p.reservationId, []);
+    allTimePayByRes.get(p.reservationId).push(p);
+
+    if (isDateRange) {
+      const payStr = toLocalDateStr(parseTimestamp(p.timestamp));
+      if (payStr && payStr >= startStr && payStr <= endStr) {
+        if (!periodPayByRes.has(p.reservationId)) periodPayByRes.set(p.reservationId, []);
+        periodPayByRes.get(p.reservationId).push(p);
       }
-    });
+    }
   }
+
+  // ─── FOOTER ACCUMULATORS ──────────────────────────────────────────────────
+  let sumTotalDue    = 0;
+  let sumAllTimePaid = 0;
+  let sumPeriodRev   = 0; // matches QuickBooks P&L: receipts dated IN the period only
+  let sumBalance     = 0;
+
+  // ─── BUILD ROWS ───────────────────────────────────────────────────────────
+  tbody.innerHTML = '';
 
   for (const reservation of reservations) {
-    const customer = customers.find(c => c.id === reservation.customerId);
-    const customerName = customer?.name || "Unknown";
-    const customerPhone = customer?.telephone || "—";
+    const resAllTimePays = allTimePayByRes.get(reservation.id) || [];
+    const resPeriodPays  = periodPayByRes.get(reservation.id)  || [];
 
-    const nights = calculateSpecialNights(
-      reservation.arrivalDate,
-      reservation.departureDate
-    );
-    const rate = parseFloat(reservation.rate) || 0;
-    const baseTotal = rate * nights;
-    
-    // Include balance adjustments
-    const adjustments = reservation.balanceAdjustments || [];
-    const totalAdjustment = adjustments.reduce((sum, adj) => {
-      return sum + (adj.type === 'discount' ? -adj.amount : adj.amount);
-    }, 0);
-    const totalDue = baseTotal + totalAdjustment;
+    // Financials
+    const nights          = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate);
+    const rate            = parseFloat(reservation.rate) || 0;
+    const baseTotal       = rate * nights;
+    const adjustments     = reservation.balanceAdjustments || [];
+    const totalAdjustment = calcAdjustmentTotal(adjustments);
+    const totalDue    = baseTotal + totalAdjustment;
+    const actualAllTimePaid = resAllTimePays.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
+    const creditTotal = calcCreditTotal(reservation.balanceCredits);
+    const allTimePaid = actualAllTimePaid + creditTotal;
+    const periodPaid  = resPeriodPays.reduce( (s, p) => s + (parseFloat(p.amount) || 0), 0);
+    const balance     = Math.max(0, totalDue - allTimePaid);
 
-    const resPayments = payments.filter(p => p.reservationId === reservation.id && !p.voided);
-    const totalPaid = resPayments.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
-    const balance = Math.max(0, totalDue - totalPaid);
-
-    // Get all receipt numbers
-    let allReceipts = "—";
-    if (resPayments.length > 0) {
-      resPayments.sort((a, b) => (a.timestamp || "").localeCompare(b.timestamp || ""));
-      allReceipts = resPayments.map(p => p.receiptNumber).filter(r => r).join(", ") || "—";
-    }
-
-    // Determine if this reservation should be included
+    // ── Filter ──────────────────────────────────────────────────────────────
     let include = false;
-    
-    if (range === "outstanding") {
+    if (range === 'outstanding') {
       include = balance > 0;
-    } else if (range === "day") {
-      // Include if created on this day OR has payment on this day
-      let createdOnDay = false;
-      if (reservation.createdAt) {
-        const createdDate = parseTimestamp(reservation.createdAt);
-        if (createdDate) {
-          const createdStr = toLocalDateStr(createdDate);
-          createdOnDay = (createdStr === startStr);
-        }
-      }
-      include = createdOnDay || periodPaymentResIds.has(reservation.id);
-    } else if (startStr && endStr) {
-      // Week/month/custom: include if reservation overlaps with period
+    } else if (range === 'day') {
+      const createdStr = toLocalDateStr(parseTimestamp(reservation.createdAt));
+      include = (createdStr === startStr) || periodPayByRes.has(reservation.id);
+    } else if (isDateRange) {
       const arrStr = reservation.arrivalDate;
       const depStr = reservation.departureDate;
-      include = arrStr <= endStr && depStr >= startStr;
+      include = (arrStr && depStr && arrStr <= endStr && depStr >= startStr) || periodPayByRes.has(reservation.id);
     }
-
     if (!include) continue;
 
-    // Use StatusUtils for consistent status formatting
-    const paymentStatusInfo = StatusUtils.formatPaymentStatus(reservation.paymentStatus);
+    // ── Customer ────────────────────────────────────────────────────────────
+    const customer      = customers.find(c => c.id === reservation.customerId);
+    const customerName  = customer?.name      || 'Unknown';
+    const customerPhone = customer?.telephone || '\u2014';
+
+    // ── Receipts column: period receipts first, then all-time count ──────────
+    const sortByTime = (a, b) => (a.timestamp || '').localeCompare(b.timestamp || '');
+    const periodNums   = [...resPeriodPays].sort(sortByTime).map(p => p.receiptNumber).filter(Boolean);
+    const allTimeNums  = [...resAllTimePays].sort(sortByTime).map(p => p.receiptNumber).filter(Boolean);
+    let receiptsDisplay = '\u2014';
+    if (isDateRange && periodNums.length > 0) {
+      receiptsDisplay = periodNums.join(', ');
+      const extra = allTimeNums.length - periodNums.length;
+      if (extra > 0) receiptsDisplay += ` <span style="color:var(--text-muted);font-size:0.8em;">(+${extra} other)</span>`;
+    } else if (allTimeNums.length > 0) {
+      receiptsDisplay = allTimeNums.join(', ');
+    }
+
+    // ── Status ──────────────────────────────────────────────────────────────
+    let displayStatus = 'Unpaid';
+    let statusColor   = '#ef4444';
+    if      (allTimePaid >= totalDue && totalDue > 0) { displayStatus = 'Fully Paid'; statusColor = '#10b981'; }
+    else if (allTimePaid > 0)                          { displayStatus = 'Partial';    statusColor = '#f59e0b'; }
+
     const checkStatusInfo = StatusUtils.formatCheckStatus(reservation);
-    
-    // Calculate display status based on actual amounts
-    let displayStatus = "Unpaid";
-    let statusColor = "#ef4444"; // red
-    if (totalPaid >= totalDue && totalDue > 0) {
-      displayStatus = "Fully Paid";
-      statusColor = "#10b981"; // green
-    } else if (totalPaid > 0) {
-      displayStatus = "Partial";
-      statusColor = "#f59e0b"; // amber
-    }
-
-    // Number of guests
     const numGuests = reservation.numGuests || reservation.guests || reservation.numberOfGuests || 1;
-    
-    // Resolve creator name properly
-    let creatorName = "—";
-    if (reservation.createdByName && reservation.createdByName !== 'Unknown') {
-      creatorName = reservation.createdByName;
-    } else if (reservation.createdBy && employeeNames[reservation.createdBy]) {
-      creatorName = employeeNames[reservation.createdBy];
-    } else if (reservation.recordedByName && reservation.recordedByName !== 'Unknown') {
-      creatorName = reservation.recordedByName;
-    } else if (reservation.createdBy) {
-      // Show truncated ID only if we couldn't find the name
-      creatorName = `(ID: ${reservation.createdBy.substring(0, 8)}...)`;
-    }
-    
-    // Truncate notes if too long
-    let notes = escapeHTML(reservation.note || reservation.notes || "—");
-    if (notes.length > 30) {
-      notes = notes.substring(0, 30) + "...";
-    }
 
-    // Build table row
-    const tr = document.createElement("tr");
+    // ── Creator ─────────────────────────────────────────────────────────────
+    let creatorName = '\u2014';
+    if      (reservation.createdByName  && reservation.createdByName  !== 'Unknown') creatorName = reservation.createdByName;
+    else if (reservation.createdBy      && employeeNames[reservation.createdBy])     creatorName = employeeNames[reservation.createdBy];
+    else if (reservation.recordedByName && reservation.recordedByName !== 'Unknown') creatorName = reservation.recordedByName;
+    else if (reservation.createdBy)                                                  creatorName = `(ID: ${reservation.createdBy.substring(0,8)}...)`;
+
+    // ── Notes ───────────────────────────────────────────────────────────────
+    let notes = escapeHTML(reservation.note || reservation.notes || '\u2014');
+    if (notes.length > 30) notes = notes.substring(0, 30) + '...';
+
+    // ── Row HTML ────────────────────────────────────────────────────────────
+    const tr = document.createElement('tr');
     tr.innerHTML = `
       <td style="white-space:nowrap;"><strong>${customerName}</strong></td>
       <td style="white-space:nowrap;">${customerPhone}</td>
-      <td style="text-align:center;font-weight:bold;">${reservation.roomNumber || "—"}</td>
+      <td style="text-align:center;font-weight:bold;">${reservation.roomNumber || '\u2014'}</td>
       <td style="white-space:nowrap;">${formatDateDMY(reservation.arrivalDate)}</td>
       <td style="white-space:nowrap;">${formatDateDMY(reservation.departureDate)}</td>
       <td style="text-align:center;">${nights}</td>
       <td style="text-align:center;">${numGuests}</td>
       <td style="text-align:right;">$${rate.toFixed(2)}</td>
       <td style="text-align:right;">$${totalDue.toFixed(2)}</td>
-      <td style="text-align:right;color:#10b981;">$${totalPaid.toFixed(2)}</td>
-      <td style="text-align:right;color:${balance > 0 ? '#ef4444' : '#10b981'}; font-weight:600;">
-        $${balance.toFixed(2)}
-      </td>
+      <td style="text-align:right;color:var(--text-secondary);">$${allTimePaid.toFixed(2)}</td>
+      <td style="text-align:right;font-weight:600;color:${periodPaid > 0 ? '#10b981' : 'var(--text-muted)'};">${isDateRange ? '$'+periodPaid.toFixed(2) : '\u2014'}</td>
+      <td style="text-align:right;color:${balance > 0 ? '#ef4444' : '#10b981'};font-weight:600;">$${balance.toFixed(2)}</td>
       <td style="white-space:nowrap;">
         <span style="color:${statusColor};font-weight:500;">${displayStatus}</span>
-        <span style="color:${checkStatusInfo.color};font-size:0.85em;">${checkStatusInfo.text !== 'Pending' ? ' · ' + checkStatusInfo.text : ''}</span>
+        <span style="color:${checkStatusInfo.color};font-size:0.85em;">${checkStatusInfo.text !== 'Pending' ? ' \u00b7 ' + checkStatusInfo.text : ''}</span>
       </td>
-      <td style="font-size:0.85em;">${allReceipts}</td>
+      <td style="font-size:0.85em;">${receiptsDisplay}</td>
       <td style="font-size:0.85em;">${creatorName}</td>
       <td style="font-size:0.85em;max-width:150px;overflow:hidden;text-overflow:ellipsis;" title="${escapeHTML(reservation.note || '')}">${notes}</td>
     `;
     tbody.appendChild(tr);
 
-    totalEarnings += totalPaid;
-    totalOutstanding += balance;
+    // Accumulators — every value matches exactly what is displayed in its column
+    sumTotalDue    += totalDue;
+    sumAllTimePaid += allTimePaid;
+    sumPeriodRev   += periodPaid;
+    sumBalance     += balance;
   }
 
-  // Update footer with comprehensive summary
-  const footer = document.getElementById("summaryFooter");
-  if (footer) {
-    const totalReservations = tbody.children.length;
-    footer.innerHTML = `
-      <div style="display:flex;flex-wrap:wrap;gap:20px;padding:15px;background:var(--bg-tertiary);border-radius:8px;margin-top:15px;">
-        <div><strong>📊 Total Reservations:</strong> ${totalReservations}</div>
-        <div><strong>💰 Total Earnings:</strong> <span style="color:#10b981;font-weight:bold;">$${totalEarnings.toFixed(2)}</span></div>
-        <div><strong>⏳ Outstanding Balance:</strong> <span style="color:#ef4444;font-weight:bold;">$${totalOutstanding.toFixed(2)}</span></div>
-        <div><strong>📅 Period:</strong> ${range === 'outstanding' ? 'Outstanding Balances' : (startStr && endStr ? `${formatDateDMY(startStr)} - ${formatDateDMY(endStr)}` : 'Today')}</div>
+  // ─── FOOTER ───────────────────────────────────────────────────────────────
+  const footer = document.getElementById('summaryFooter');
+  if (!footer) return;
+
+  const rowCount    = tbody.children.length;
+  const periodLabel = range === 'outstanding'
+    ? 'Outstanding Balances'
+    : (isDateRange ? `${formatDateDMY(startStr)} \u2013 ${formatDateDMY(endStr)}` : 'Today');
+
+  footer.innerHTML = `
+    <div style="margin-top:16px;">
+
+      ${isDateRange && range !== 'outstanding' ? `
+      <div style="background:#4f46e5;border-radius:8px;padding:18px 24px;margin-bottom:14px;color:#fff;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+        <div>
+          <div style="font-size:11px;font-weight:600;opacity:0.85;text-transform:uppercase;letter-spacing:0.6px;">Revenue Received \u2014 ${periodLabel}</div>
+          <div style="font-size:42px;font-weight:800;margin:4px 0;line-height:1;">$${sumPeriodRev.toFixed(2)}</div>
+          <div style="font-size:11px;opacity:0.75;">Valid non-voided receipts dated within this period. Matches QuickBooks P&amp;L.</div>
+        </div>
+        <div style="font-size:64px;font-weight:900;opacity:0.15;line-height:1;user-select:none;">$</div>
+      </div>` : ''}
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;">
+
+        <div style="padding:12px 14px;background:var(--bg-secondary);border-radius:8px;border-top:3px solid var(--accent-primary);">
+          <div style="font-size:10px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;">Reservations</div>
+          <div style="font-size:28px;font-weight:700;color:var(--text-primary);margin-top:2px;">${rowCount}</div>
+          <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">Shown for period</div>
+        </div>
+
+        <div style="padding:12px 14px;background:var(--bg-secondary);border-radius:8px;border-top:3px solid var(--accent-primary);">
+          <div style="font-size:10px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;">Total Cost</div>
+          <div style="font-size:28px;font-weight:700;color:var(--text-primary);margin-top:2px;">$${sumTotalDue.toFixed(2)}</div>
+          <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">Total cost of shown reservations</div>
+        </div>
+
+        <div style="padding:12px 14px;background:var(--bg-secondary);border-radius:8px;border-top:3px solid #6b7280;">
+          <div style="font-size:10px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;">Paid (All-time)</div>
+          <div style="font-size:28px;font-weight:700;color:#10b981;margin-top:2px;">$${sumAllTimePaid.toFixed(2)}</div>
+          <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">All payments ever on shown reservations</div>
+        </div>
+
+        <div style="padding:12px 14px;background:var(--bg-secondary);border-radius:8px;border-top:3px solid #ef4444;">
+          <div style="font-size:10px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;">Outstanding Balance</div>
+          <div style="font-size:28px;font-weight:700;color:#ef4444;margin-top:2px;">$${sumBalance.toFixed(2)}</div>
+          <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">Still owed on shown reservations</div>
+        </div>
+
       </div>
-    `;
-  }
+    </div>
+  `;
 
-  console.log('📊 Summary complete:', { 
-    rows: tbody.children.length, 
-    totalEarnings, 
-    totalOutstanding 
-  });
+  console.log('[Report]', { range, period: periodLabel, rows: rowCount, sumTotalDue, sumAllTimePaid, sumPeriodRev, sumBalance });
 }
 
 {
@@ -10681,14 +11403,14 @@ async function fillDashboard() {
     
     // Include any balance adjustments (discounts or extra charges)
     const adjustments = reservation.balanceAdjustments || [];
-    const totalAdjustment = adjustments.reduce((sum, adj) => {
-      return sum + (adj.type === 'discount' ? -adj.amount : adj.amount);
-    }, 0);
+    const totalAdjustment = calcAdjustmentTotal(adjustments);
     const totalDue = baseTotal + totalAdjustment;
     
-    // Subtract payments (excluding voided ones)
+    // Subtract payments (excluding voided ones) and credits
     const allPayments = (window._allPaymentsCache || []).filter(p => p.reservationId === reservation.id && !p.voided);
-    const totalPaid = allPayments.reduce((sum, pay) => sum + (parseFloat(pay.amount) || 0), 0);
+    const actualPaid = allPayments.reduce((sum, pay) => sum + (parseFloat(pay.amount) || 0), 0);
+    const creditTotal = calcCreditTotal(reservation.balanceCredits);
+    const totalPaid = actualPaid + creditTotal;
     
     const bal = Math.max(0, totalDue - totalPaid);
     totalBalanceDue += bal;
@@ -10826,8 +11548,8 @@ async function fillDashboard() {
         // Future reservation - show RESERVED
         statusDisplay = '<span style="background:#ede9fe;color:#7c3aed;padding:2px 8px;border-radius:4px;font-size:0.85em;font-weight:600;">RESERVED</span>';
       } else {
-        // Current or past - show payment status
-        const paymentStatus = StatusUtils.formatPaymentStatus(r.paymentStatus);
+        // Current or past - compute status from live payments cache (never trust stale paymentStatus field)
+        const paymentStatus = StatusUtils.formatPaymentStatus(computeLivePaymentStatus(r));
         statusDisplay = `<span style="color:${paymentStatus.color};font-weight:500;">${paymentStatus.text}</span>`;
       }
       
@@ -10837,7 +11559,38 @@ async function fillDashboard() {
   }
 
   // Render 7-day availability grid on dashboard
-  renderDashboardAvailabilityGrid(reservations, customersList);
+  try {
+    renderDashboardAvailabilityGrid(reservations, customersList);
+  } catch (gridErr) {
+    console.error("Dashboard availability grid render failed:", gridErr);
+  }
+
+  // ── ONE-TIME PER SESSION: silently heal stale paymentStatus in Firestore ──
+  // Only runs after both reservations AND payments caches are loaded.
+  // Uses computeLivePaymentStatus (the same logic as display) so Firestore
+  // always stays consistent with what the UI is already showing.
+  if (!window._paymentStatusHealDone && window._allPaymentsCache && window._allPaymentsCache.length >= 0) {
+    window._paymentStatusHealDone = true; // Prevent repeated runs
+    const toHeal = reservations.filter(r => {
+      const computed = computeLivePaymentStatus(r);
+      const stored   = r.paymentStatus;
+      // Normalize legacy 'paid' alias and skip if already correct
+      const storedNorm = stored === 'paid' ? 'fully_paid' : stored;
+      return computed !== storedNorm;
+    });
+    if (toHeal.length > 0) {
+      console.log(`🔧 Healing ${toHeal.length} stale paymentStatus value(s) in Firestore...`);
+      toHeal.forEach(async r => {
+        const correct = computeLivePaymentStatus(r);
+        try {
+          await updateDoc(doc(db, "reservations", r.id), { paymentStatus: correct });
+          console.log(`  ✅ ${r.id}: ${r.paymentStatus} → ${correct}`);
+        } catch (e) {
+          console.warn(`  ⚠️ Could not heal ${r.id}:`, e.message);
+        }
+      });
+    }
+  }
 }
 
 // Dashboard 7-Day Availability Grid
@@ -10892,9 +11645,11 @@ function renderDashboardAvailabilityGrid(reservations, customersList) {
       } else if (res) {
         const customer = customersList.find(c => c.id === res.customerId);
         const name = customer ? customer.name : 'Unknown';
+        // Always derive status from live payments cache — never trust the stored paymentStatus field
+        const liveStatus = computeLivePaymentStatus(res);
         let statusClass = 'unpaid';
-        if (res.paymentStatus === 'paid' || res.paymentStatus === 'fully_paid') statusClass = 'paid';
-        else if (res.paymentStatus === 'partially_paid') statusClass = 'partial';
+        if (liveStatus === 'fully_paid') statusClass = 'paid';
+        else if (liveStatus === 'partially_paid') statusClass = 'partial';
         
         // Check-in/out status - determine cell background and indicator
         // Use actualCheckInTime for check-in status (consistent with rest of app)
@@ -11228,15 +11983,34 @@ setInterval(autoCheckoutOverdueGuests, 30 * 60 * 1000);
     window._allPaymentsCache = paymentsSnapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
     console.log('Payments loaded:', window._allPaymentsCache.length);
     
+    // Deep-link handler: called after dashboard is ready in both branches
+    async function handleDeepLink() {
+      const deepLinkResId = new URLSearchParams(window.location.search).get('res');
+      if (!deepLinkResId) return;
+      history.replaceState(null, '', window.location.pathname);
+      try {
+        const resDoc = await getDoc(doc(db, 'reservations', deepLinkResId));
+        if (resDoc.exists()) {
+          window.showEditDeletePopup({ id: resDoc.id, ...resDoc.data() });
+        } else {
+          console.warn('[DeepLink] Reservation not found:', deepLinkResId);
+        }
+      } catch (e) {
+        console.warn('[DeepLink] Could not open reservation:', e);
+      }
+    }
+
     // Wait for DOM to be ready before filling dashboard
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', async () => {
         await autoCheckoutOverdueGuests();
         await fillDashboard();
+        await handleDeepLink();
       });
     } else {
       await autoCheckoutOverdueGuests();
       await fillDashboard();
+      await handleDeepLink();
     }
   } catch (err) {
     console.error("Dashboard init failed:", err);
@@ -11280,6 +12054,23 @@ function printReceiptFromPayment(payment) {
   const paymentDate = payment.timestamp ? formatDateDMY(payment.timestamp) : formatDateDMY(new Date());
   const method = payment.method ? payment.method.charAt(0).toUpperCase() + payment.method.slice(1) : 'Cash';
   
+  // Calculate balance info for the receipt
+  let totalCost = 0;
+  let totalPaidAll = 0;
+  let balance = 0;
+  if (reservation) {
+    const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate);
+    const rate = parseFloat(reservation.rate || 0);
+    const baseTotal = rate * nights;
+    const adjustments = reservation.balanceAdjustments || [];
+    const totalAdjustment = calcAdjustmentTotal(adjustments);
+    totalCost = baseTotal + totalAdjustment;
+    const resPayments = (window._allPaymentsCache || [])
+      .filter(p => p.reservationId === reservation.id && !p.voided);
+    totalPaidAll = resPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) + calcCreditTotal(reservation.balanceCredits);
+    balance = Math.max(0, totalCost - totalPaidAll);
+  }
+  
   printSingleReceipt({
     receiptNumber: payment.receiptNumber,
     amount: parseFloat(payment.amount).toFixed(2),
@@ -11288,13 +12079,20 @@ function printReceiptFromPayment(payment) {
     customerName: customer.name || 'Guest',
     room: reservation?.roomNumber || 'N/A',
     arrivalDate: reservation?.arrivalDate || 'N/A',
-    departureDate: reservation?.departureDate || 'N/A'
+    departureDate: reservation?.departureDate || 'N/A',
+    totalCost: totalCost.toFixed(2),
+    totalPaid: totalPaidAll.toFixed(2),
+    balance: balance.toFixed(2)
   });
 }
 
 // ✅ Print a single receipt from manage payment modal
 function printSingleReceipt(data) {
-  const { receiptNumber, amount, method, date, customerName, room, arrivalDate, departureDate } = data;
+  const { receiptNumber, amount, method, date, customerName, room, arrivalDate, departureDate, totalCost, totalPaid, balance } = data;
+  
+  // Format stay dates for display
+  const arrDisplay = arrivalDate && arrivalDate !== 'N/A' ? formatDateDMY(arrivalDate) : 'N/A';
+  const depDisplay = departureDate && departureDate !== 'N/A' ? formatDateDMY(departureDate) : 'N/A';
   
   const receiptHTML = `
     <!DOCTYPE html>
@@ -11322,6 +12120,9 @@ function printSingleReceipt(data) {
         .amount-section { text-align: center; margin: 20px 0; padding: 16px; background: #e8f5e9; border: 2px solid #4caf50; border-radius: 8px; }
         .amount-section .label { font-size: 14px; color: #666; }
         .amount-section .value { font-size: 32px; font-weight: bold; color: #2e7d32; }
+        .balance-section { margin: 12px 0; padding: 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 13px; }
+        .balance-row { display: flex; justify-content: space-between; padding: 3px 0; }
+        .balance-row.total { border-top: 1px solid #000; margin-top: 4px; padding-top: 6px; font-weight: bold; }
         .footer { text-align: center; margin-top: 20px; padding-top: 12px; border-top: 2px dashed #000; font-size: 12px; color: #666; }
         .thank-you { font-size: 16px; font-weight: bold; margin-bottom: 8px; }
         @media print {
@@ -11353,7 +12154,7 @@ function printSingleReceipt(data) {
         </div>
         <div class="row">
           <span class="label">Stay:</span>
-          <span>${arrivalDate} - ${departureDate}</span>
+          <span>${arrDisplay} - ${depDisplay}</span>
         </div>
         <div class="row">
           <span class="label">Payment:</span>
@@ -11365,6 +12166,23 @@ function printSingleReceipt(data) {
         <div class="label">AMOUNT PAID</div>
         <div class="value">$${amount}</div>
       </div>
+      
+      ${totalCost ? `
+      <div class="balance-section">
+        <div class="balance-row">
+          <span>Total Cost:</span>
+          <span>$${totalCost}</span>
+        </div>
+        <div class="balance-row">
+          <span>Total Paid:</span>
+          <span style="color:#2e7d32;">$${totalPaid}</span>
+        </div>
+        <div class="balance-row total">
+          <span>Balance:</span>
+          <span style="color:${parseFloat(balance) > 0 ? '#d32f2f' : '#2e7d32'};">$${balance}</span>
+        </div>
+      </div>
+      ` : ''}
       
       <div class="footer">
         <div class="thank-you">Thank You!</div>
@@ -11398,17 +12216,18 @@ async function openPrintRegistrationForm(reservation) {
     .map(doc => ({ id: doc.id, ...doc.data() }))
     .filter(p => p.reservationId === freshReservation.id && !p.voided);
 
-  const sortedPayments = relatedPayments.sort((a, b) => (b.timestamp || "").localeCompare(a.timestamp || ""));
+  // Sort ASCENDING (oldest first) so running balance subtracts in correct order
+  const sortedPayments = relatedPayments.sort(comparePaymentsByTime);
   const rate = parseFloat(freshReservation.rate || 0);
   const nights = calculateSpecialNights(freshReservation.arrivalDate, freshReservation.departureDate);
   const baseTotal = rate * nights;
   // Include balance adjustments
   const adjustments = freshReservation.balanceAdjustments || [];
-  const totalAdjustment = adjustments.reduce((sum, adj) => {
-    return sum + (adj.type === 'discount' ? -adj.amount : adj.amount);
-  }, 0);
+  const totalAdjustment = calcAdjustmentTotal(adjustments);
   const totalDue = baseTotal + totalAdjustment;
-  const totalPaid = relatedPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+  const actualPaid = relatedPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+  const creditTotal = calcCreditTotal(freshReservation.balanceCredits);
+  const totalPaid = actualPaid + creditTotal;
   let balanceRemaining = Math.max(0, totalDue - totalPaid);
   if (balanceRemaining < 0) balanceRemaining = 0;
 
@@ -11417,12 +12236,7 @@ async function openPrintRegistrationForm(reservation) {
     totalDue,
     balanceRemaining,
     receiptNumber: sortedPayments[0]?.receiptNumber || "—",
-    receipts: sortedPayments.slice(0, 4).map(p => ({
-      number: p.receiptNumber || "—",
-      date: p.timestamp ? formatDateDMY(p.timestamp) : "—",
-      amount: p.amount || "0.00",
-      method: p.method ? p.method.charAt(0).toUpperCase() + p.method.slice(1) : 'N/A'
-    }))
+    receipts: buildReceiptsWithBalance(sortedPayments, freshReservation)
   };
 
   /*// Use stored ID image for existing reservations
@@ -11449,16 +12263,17 @@ async function showRegistrationFormWithSavedId(customer) {
       .map(doc => ({ id: doc.id, ...doc.data() }))
       .filter(p => p.reservationId === reservation.id && !p.voided);
 
-    const sortedPayments = relatedPayments.sort((a, b) => (b.timestamp || "").localeCompare(a.timestamp || ""));
+    // Sort ASCENDING (oldest first) so running balance subtracts in correct order
+    const sortedPayments = relatedPayments.sort(comparePaymentsByTime);
     const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate);
     const baseTotal = (parseFloat(reservation.rate) || 0) * nights;
     // Include balance adjustments
     const adjustments = reservation.balanceAdjustments || [];
-    const totalAdjustment = adjustments.reduce((sum, adj) => {
-      return sum + (adj.type === 'discount' ? -adj.amount : adj.amount);
-    }, 0);
+    const totalAdjustment = calcAdjustmentTotal(adjustments);
     const totalDue = baseTotal + totalAdjustment;
-    const totalPaid = relatedPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+    const actualPaid = relatedPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+    const creditTotal = calcCreditTotal(reservation.balanceCredits);
+    const totalPaid = actualPaid + creditTotal;
     const balanceRemaining = Math.max(0, totalDue - totalPaid);
 
     const paymentSummary = {
@@ -11466,12 +12281,7 @@ async function showRegistrationFormWithSavedId(customer) {
       totalDue,
       balanceRemaining,
       receiptNumber: sortedPayments[0]?.receiptNumber || "—",
-      receipts: sortedPayments.slice(0, 4).map(p => ({
-        number: p.receiptNumber || "—",
-        date: p.timestamp ? formatDateDMY(p.timestamp) : "—",
-        amount: p.amount || "0.00",
-        method: p.method ? p.method.charAt(0).toUpperCase() + p.method.slice(1) : 'N/A'
-      }))
+      receipts: buildReceiptsWithBalance(sortedPayments, reservation)
     };
 
     // 🔹 Use saved ID image
@@ -11497,9 +12307,7 @@ async function showFormPreview(reservation, customer, idImageUrl) {
     .filter(p => p.reservationId === freshReservation.id && !p.voided);
 
   // Sort payments by timestamp ASCENDING (oldest first) for proper running balance
-  const sortedPayments = relatedPayments.sort((a, b) =>
-    (a.timestamp || "").localeCompare(b.timestamp || "")
-  );
+  const sortedPayments = relatedPayments.sort(comparePaymentsByTime);
 
   const rate = parseFloat(freshReservation.rate || 0);
   const nights = calculateSpecialNights(
@@ -11509,14 +12317,14 @@ async function showFormPreview(reservation, customer, idImageUrl) {
   const baseTotal = rate * nights;
   // Include balance adjustments
   const adjustments = freshReservation.balanceAdjustments || [];
-  const totalAdjustment = adjustments.reduce((sum, adj) => {
-    return sum + (adj.type === 'discount' ? -adj.amount : adj.amount);
-  }, 0);
+  const totalAdjustment = calcAdjustmentTotal(adjustments);
   const totalDue = baseTotal + totalAdjustment;
-  const totalPaid = relatedPayments.reduce(
+  const actualPaid = relatedPayments.reduce(
     (sum, p) => sum + parseFloat(p.amount || 0),
     0
   );
+  const creditTotal = calcCreditTotal(freshReservation.balanceCredits);
+  const totalPaid = actualPaid + creditTotal;
   const balanceRemaining = Math.max(0, totalDue - totalPaid);
 
   const paymentSummary = {
@@ -11524,12 +12332,7 @@ async function showFormPreview(reservation, customer, idImageUrl) {
     totalDue,
     balanceRemaining,
     receiptNumber: sortedPayments[0]?.receiptNumber || "—",
-    receipts: sortedPayments.slice(0, 4).map((p) => ({
-      number: p.receiptNumber || "—",
-      date: p.timestamp ? formatDateDMY(p.timestamp) : "—",
-      amount: p.amount || "0.00",
-      method: p.method ? p.method.charAt(0).toUpperCase() + p.method.slice(1) : 'N/A'
-    })),
+    receipts: buildReceiptsWithBalance(sortedPayments, freshReservation),
   };
 
   // build the registration form HTML
@@ -11797,128 +12600,105 @@ document.getElementById('inviteEmployeeBtn')?.addEventListener('click', generate
  */
 document.getElementById('bulkQBResyncBtn')?.addEventListener('click', async () => {
   try {
-    // Gather all payment data for QB summary
     const paymentsSnapshot = await getDocs(collection(db, "payments"));
     const allPayments = paymentsSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
 
-    // Find last synced receipt
-    const syncedPayments = allPayments
-      .filter(p => p.qbSyncStatus === 'synced' && !p.voided)
+    // Valid (non-voided) payments sorted by receipt number
+    const validPayments = allPayments
+      .filter(p => !p.voided && p.qbSyncStatus !== 'voided' && p.status !== 'voided' && p.receiptNumber)
       .sort((a, b) => {
-        const numA = parseInt(a.receiptNumber?.replace(/\D/g, '') || '0', 10);
-        const numB = parseInt(b.receiptNumber?.replace(/\D/g, '') || '0', 10);
-        return numB - numA;
+        const numA = parseInt(a.receiptNumber.replace(/\D/g, '') || '0', 10);
+        const numB = parseInt(b.receiptNumber.replace(/\D/g, '') || '0', 10);
+        return numA - numB;
       });
-    const lastSynced = syncedPayments.length > 0 ? syncedPayments[0] : null;
-    const lastSyncedNum = lastSynced ? lastSynced.receiptNumber : 'None';
-    const lastSyncedDate = lastSynced?.qbSyncedAt ? formatDateTimeDMY(lastSynced.qbSyncedAt) : 'N/A';
 
-    // Find unsent (non-voided, non-synced)
-    const unsentPayments = allPayments.filter(p => {
-      if (p.voided) return false;
-      if (p.qbSyncStatus === 'synced') return false;
-      if (p.qbSyncStatus === 'voided') return false;
-      return true;
-    }).sort((a, b) => {
-      const numA = parseInt(a.receiptNumber?.replace(/\D/g, '') || '0', 10);
-      const numB = parseInt(b.receiptNumber?.replace(/\D/g, '') || '0', 10);
-      return numA - numB;
-    });
+    // Last synced receipt
+    const lastSynced = [...validPayments]
+      .filter(p => p.qbSyncStatus === 'synced')
+      .sort((a, b) => parseInt(b.receiptNumber.replace(/\D/g, '') || '0', 10) - parseInt(a.receiptNumber.replace(/\D/g, '') || '0', 10))[0];
+    const lastSyncedDisplay = lastSynced ? lastSynced.receiptNumber : 'None';
 
-    // Find voided count
-    const voidedCount = allPayments.filter(p => p.voided || p.qbSyncStatus === 'voided').length;
-    // Find failed count
-    const failedPayments = allPayments.filter(p => p.qbSyncStatus === 'failed' && !p.voided);
+    // Latest receipt overall
+    const latestReceipt = validPayments.length > 0 ? validPayments[validPayments.length - 1].receiptNumber : 'None';
 
-    // Build receipt list preview (first 15)
-    const previewList = unsentPayments.slice(0, 15).map(p => p.receiptNumber).join(', ');
-    const moreCount = unsentPayments.length > 15 ? unsentPayments.length - 15 : 0;
-
-    // Create the QB summary modal
+    // Build simple modal
     let qbModal = document.getElementById('qbSyncSummaryModal');
     if (qbModal) qbModal.remove();
 
     qbModal = document.createElement('div');
     qbModal.id = 'qbSyncSummaryModal';
-    qbModal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:center;justify-content:center;';
+    qbModal.className = 'modal';
+    qbModal.style.display = 'block';
     qbModal.innerHTML = `
-      <div style="background:#fff;border-radius:16px;padding:28px 32px;max-width:520px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.2);font-family:'Segoe UI',sans-serif;max-height:85vh;overflow-y:auto;">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;">
-          <h3 style="margin:0;color:#7c3aed;font-size:18px;">
-            <span class="material-icons" style="vertical-align:middle;margin-right:6px;">cloud_upload</span>
-            QuickBooks Sync Summary
-          </h3>
-          <button id="closeQBSyncModal" style="background:none;border:none;cursor:pointer;font-size:20px;color:#888;">✕</button>
-        </div>
-        
-        <div style="background:#f8f5ff;border-radius:10px;padding:14px 16px;margin-bottom:14px;border-left:4px solid #7c3aed;">
-          <div style="font-size:13px;color:#666;margin-bottom:4px;">Last Synced Receipt</div>
-          <div style="font-size:20px;font-weight:700;color:#7c3aed;">#${lastSyncedNum}</div>
-          <div style="font-size:12px;color:#888;margin-top:2px;">${lastSyncedDate}</div>
-        </div>
+      <div class="modal-content" style="max-width:420px;">
+        <button class="close" id="closeQBSyncModal" aria-label="Close">&times;</button>
+        <h2 style="display:flex;align-items:center;gap:8px;margin-bottom:16px;">
+          <span class="material-icons">cloud_upload</span> Send to QuickBooks
+        </h2>
 
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px;">
-          <div style="background:#f0fdf4;border-radius:8px;padding:10px;text-align:center;">
-            <div style="font-size:22px;font-weight:700;color:#16a34a;">${syncedPayments.length}</div>
-            <div style="font-size:11px;color:#666;">Synced</div>
+        <table style="width:100%;border-collapse:collapse;font-size:0.9em;margin-bottom:16px;">
+          <tr>
+            <td style="padding:6px 0;color:var(--text-muted);">Last Synced Receipt</td>
+            <td style="padding:6px 0;font-weight:700;color:var(--text-primary);">#${escapeHTML(lastSyncedDisplay)}</td>
+          </tr>
+          <tr>
+            <td style="padding:6px 0;color:var(--text-muted);">Latest Receipt Created</td>
+            <td style="padding:6px 0;font-weight:700;color:var(--text-primary);">#${escapeHTML(latestReceipt)}</td>
+          </tr>
+          <tr>
+            <td style="padding:6px 0;color:var(--text-muted);">Total Valid Receipts</td>
+            <td style="padding:6px 0;font-weight:700;color:var(--text-primary);">${validPayments.length}</td>
+          </tr>
+        </table>
+
+        <div style="margin-bottom:16px;">
+          <label for="qbStartFrom" style="font-size:0.87em;font-weight:600;color:var(--text-primary);display:block;margin-bottom:6px;">Start from receipt #:</label>
+          <input type="number" id="qbStartFrom" placeholder="e.g. 106" min="1"
+            style="width:100%;padding:8px 10px;border:1px solid var(--border-medium);border-radius:var(--radius-md);font-size:0.9em;background:var(--bg-primary);color:var(--text-primary);box-sizing:border-box;" />
+          <div style="font-size:0.78em;color:var(--text-muted);margin-top:4px;">
+            All non-voided receipts from this number up to #${escapeHTML(latestReceipt)} will be sent.
           </div>
-          <div style="background:${unsentPayments.length > 0 ? '#fffbeb' : '#f0fdf4'};border-radius:8px;padding:10px;text-align:center;">
-            <div style="font-size:22px;font-weight:700;color:${unsentPayments.length > 0 ? '#d97706' : '#16a34a'};">${unsentPayments.length}</div>
-            <div style="font-size:11px;color:#666;">Unsent</div>
-          </div>
-          <div style="background:#fef2f2;border-radius:8px;padding:10px;text-align:center;">
-            <div style="font-size:22px;font-weight:700;color:#dc2626;">${voidedCount}</div>
-            <div style="font-size:11px;color:#666;">Voided</div>
-          </div>
         </div>
 
-        ${failedPayments.length > 0 ? `
-        <div style="background:#fef2f2;border-left:4px solid #ef4444;border-radius:8px;padding:10px 14px;margin-bottom:14px;">
-          <div style="font-size:13px;color:#ef4444;font-weight:600;">⚠️ ${failedPayments.length} Failed Receipt(s)</div>
-          <div style="font-size:12px;color:#888;margin-top:4px;">These will be retried: ${failedPayments.slice(0, 5).map(p => p.receiptNumber).join(', ')}${failedPayments.length > 5 ? '...' : ''}</div>
-        </div>` : ''}
+        <div id="qbPreviewCount" style="font-size:0.85em;color:var(--text-secondary);margin-bottom:14px;"></div>
 
-        ${unsentPayments.length > 0 ? `
-        <div style="background:#fafafa;border-radius:8px;padding:12px 14px;margin-bottom:16px;">
-          <div style="font-size:13px;color:#444;font-weight:600;margin-bottom:6px;">Receipts to Send:</div>
-          <div style="font-size:12px;color:#666;line-height:1.6;word-break:break-all;">${previewList}${moreCount > 0 ? ` <span style="color:#7c3aed;font-weight:600;">...and ${moreCount} more</span>` : ''}</div>
+        <div class="modal-footer" style="display:flex;gap:8px;justify-content:flex-end;">
+          <button id="cancelQBSync" class="btn btn-ghost">Cancel</button>
+          <button id="confirmQBSync" class="btn btn-primary">Send to QB</button>
         </div>
-
-        <div style="display:flex;gap:10px;justify-content:flex-end;">
-          <button id="cancelQBSync" style="padding:10px 20px;border:1px solid #ddd;background:#fff;border-radius:8px;cursor:pointer;font-size:14px;color:#666;">Cancel</button>
-          <button id="confirmQBSync" style="padding:10px 24px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">
-            Send ${unsentPayments.length} Receipt${unsentPayments.length > 1 ? 's' : ''} to QB
-          </button>
-        </div>` : `
-        <div style="text-align:center;padding:12px 0;color:#16a34a;font-weight:600;">
-          ✅ All receipts are synced to QuickBooks!
-        </div>
-        <div style="display:flex;justify-content:flex-end;margin-top:10px;">
-          <button id="cancelQBSync" style="padding:10px 20px;border:1px solid #ddd;background:#fff;border-radius:8px;cursor:pointer;font-size:14px;color:#666;">Close</button>
-        </div>`}
       </div>`;
 
     document.body.appendChild(qbModal);
 
-    // Close handlers
+    // Preview count updater
+    function updatePreview() {
+      const startNum = parseInt(document.getElementById('qbStartFrom').value) || 0;
+      const toSend = validPayments.filter(p => {
+        if (startNum <= 0) return p.qbSyncStatus !== 'synced';
+        const num = parseInt(p.receiptNumber.replace(/\D/g, '') || '0', 10);
+        return num >= startNum;
+      });
+      const el = document.getElementById('qbPreviewCount');
+      if (el) el.textContent = toSend.length + ' receipt(s) will be sent.';
+    }
+    updatePreview();
+
+    document.getElementById('qbStartFrom').addEventListener('input', updatePreview);
     document.getElementById('closeQBSyncModal').onclick = () => qbModal.remove();
     document.getElementById('cancelQBSync').onclick = () => qbModal.remove();
     qbModal.addEventListener('click', (e) => { if (e.target === qbModal) qbModal.remove(); });
 
-    // Send handler
-    const confirmBtn = document.getElementById('confirmQBSync');
-    if (confirmBtn) {
-      confirmBtn.onclick = async () => {
-        confirmBtn.disabled = true;
-        confirmBtn.innerHTML = '<span class="material-icons" style="animation:spin 1s linear infinite;font-size:16px;vertical-align:middle;">sync</span> Sending...';
-        
-        qbModal.remove();
-        await sendUnsentToQuickBooks();
-      };
-    }
+    document.getElementById('confirmQBSync').onclick = async () => {
+      const startNum = parseInt(document.getElementById('qbStartFrom').value) || 0;
+      const btn = document.getElementById('confirmQBSync');
+      btn.disabled = true;
+      btn.textContent = 'Sending...';
+      qbModal.remove();
+      await sendUnsentToQuickBooks(startNum);
+    };
 
   } catch (err) {
-    console.error("QB Sync Summary error:", err);
+    console.error("QB Sync error:", err);
     alert("Failed to load QB sync summary: " + err.message);
   }
 });
@@ -12200,7 +12980,7 @@ window.changeEmployeeRole = async function(employeeId, newRole) {
       newRole: newRole
     });
 
-    alert(`✅ ${empData.name || 'Employee'}'s role changed to ${newRole.toUpperCase()}`);
+    alert(`${empData.name || 'Employee'}'s role changed to ${newRole.toUpperCase()}`);
     
     // Refresh the modal
     document.getElementById('manageEmployeesBtn').click();

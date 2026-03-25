@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Reports - Glimbaro Guest House</title>
+
+  <meta http-equiv="Content-Security-Policy" content="
+    default-src 'self';
+    script-src 'self' 'unsafe-inline' https://www.gstatic.com;
+    style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+    font-src 'self' https://fonts.gstatic.com;
+    img-src 'self' data: https: blob:;
+    connect-src 'self' https://*.firebaseio.com https://*.googleapis.com https://www.gstatic.com;
+    base-uri 'self';
+    form-action 'self';
+  ">
+  <meta http-equiv="X-Content-Type-Options" content="nosniff">
+
+  <link rel="dns-prefetch" href="//fonts.googleapis.com">
+  <link rel="dns-prefetch" href="//www.gstatic.com">
+  <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
+  <link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js">
+  <link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js">
+  <link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js">
+
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/main.css">
+
+  <style>
+    /* ── Page layout ─────────────────────────────────────────── */
+    .sub-page-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 20px;
+      background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border-light);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .sub-page-title {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin: 0;
+      flex: 1;
+    }
+    .sub-page-subtitle {
+      font-size: 13px;
+      color: var(--text-secondary);
+      margin: 0;
+    }
+    .sub-page-main { padding: 20px; }
+
+    /* ── Home / back button ──────────────────────────────────── */
+    .home-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 14px;
+      border-radius: var(--radius-md);
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-medium);
+      color: var(--text-primary);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      text-decoration: none;
+      font-family: var(--font-family);
+      transition: background 0.15s;
+    }
+    .home-btn:hover { background: var(--border-light); }
+
+    /* ── Filter toolbar ──────────────────────────────────────── */
+    .report-toolbar {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 16px;
+      padding: 14px 16px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius-md);
+    }
+    .report-toolbar label {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-secondary);
+    }
+    .report-toolbar select,
+    .report-toolbar input[type="date"] {
+      padding: 7px 10px;
+      border: 1px solid var(--border-medium);
+      border-radius: var(--radius-md);
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      font-size: 13px;
+      font-family: var(--font-family);
+    }
+    .toolbar-spacer { flex: 1; }
+
+    /* ── Spinner ─────────────────────────────────────────────── */
+    .page-spinner {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      padding: 48px;
+      color: var(--text-secondary);
+      font-size: 14px;
+    }
+    .spinner-ring {
+      width: 36px;
+      height: 36px;
+      border: 3px solid var(--border-light);
+      border-top-color: var(--accent-primary);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Report table wrapper ────────────────────────────────── */
+    .table-wrapper {
+      overflow-x: auto;
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius-md);
+      background: var(--bg-secondary);
+    }
+    .table-wrapper.collapsed { display: none; }
+
+    /* ── Summary table overrides ─────────────────────────────── */
+    #reportTable {
+      min-width: 1400px;
+      border-collapse: collapse;
+      font-size: 13px;
+      width: 100%;
+    }
+    #reportTable th {
+      background: var(--bg-tertiary);
+      color: var(--text-secondary);
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      padding: 9px 10px;
+      border-bottom: 2px solid var(--border-medium);
+      position: sticky;
+      top: 0;
+      white-space: nowrap;
+    }
+    #reportTable td {
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--border-light);
+      color: var(--text-primary);
+    }
+    #reportTable tr:hover td { background: var(--bg-tertiary); }
+
+    /* ── Footer cards ────────────────────────────────────────── */
+    #reportFooter { margin-top: 16px; }
+
+    /* ── Bottom bar ──────────────────────────────────────────── */
+    .sub-page-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 20px;
+      border-top: 1px solid var(--border-light);
+      background: var(--bg-secondary);
+      margin-top: 24px;
+    }
+    .row-count {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    /* ── Print override ──────────────────────────────────────── */
+    @media print {
+      .sub-page-header,
+      .report-toolbar,
+      .sub-page-footer { display: none !important; }
+      .table-wrapper { border: none; overflow: visible; }
+      body { padding: 0; }
+    }
+  </style>
+</head>
+<body data-theme="light">
+
+  <!-- ── Loading overlay ── -->
+  <div class="auth-loading-overlay" id="authLoadingOverlay" role="status" aria-label="Verifying authentication">
+    <div class="auth-loading-logo">
+      <span class="material-icons" aria-hidden="true">hotel</span>
+    </div>
+    <div class="auth-loading-spinner" aria-hidden="true"></div>
+    <p class="auth-loading-text">Verifying authentication...</p>
+  </div>
+
+  <!-- ── Top header ── -->
+  <header class="sub-page-header">
+    <a href="index.html" class="home-btn" title="Back to Dashboard">
+      <span class="material-icons" style="font-size:18px;" aria-hidden="true">arrow_back</span>
+      Dashboard
+    </a>
+    <div>
+      <h1 class="sub-page-title">Reservation / Payment Report</h1>
+      <p class="sub-page-subtitle">Glimbaro Guest House</p>
+    </div>
+    <div style="margin-left:auto; display:flex; gap:8px; align-items:center;">
+      <button id="themeToggleBtn" class="btn-icon" title="Toggle Theme">
+        <span id="themeIcon" class="material-icons">dark_mode</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- ── Main content ── -->
+  <main class="sub-page-main">
+
+    <!-- Toolbar -->
+    <div class="report-toolbar">
+      <label for="summaryRange">View:</label>
+      <select id="summaryRange">
+        <option value="day">Today</option>
+        <option value="week">This Week</option>
+        <option value="month">This Month</option>
+        <option value="lastMonth" selected>Last Month</option>
+        <option value="custom">Custom Range</option>
+        <option value="outstanding">Outstanding Only</option>
+      </select>
+
+      <div id="customStartGroup" style="display:none; align-items:center; gap:6px;">
+        <label for="summaryStart">From:</label>
+        <input type="date" id="summaryStart" />
+      </div>
+      <div id="customEndGroup" style="display:none; align-items:center; gap:6px;">
+        <label for="summaryEnd">To:</label>
+        <input type="date" id="summaryEnd" />
+      </div>
+
+      <button id="loadReportBtn" class="btn btn-primary btn-sm">Load Report</button>
+
+      <div class="toolbar-spacer"></div>
+
+      <button id="toggleTableBtn" class="btn btn-secondary btn-sm">Collapse Table</button>
+      <button id="printBtn" class="btn btn-secondary btn-sm">Print</button>
+      <button id="csvBtn" class="btn btn-secondary btn-sm">Export CSV</button>
+    </div>
+
+    <!-- Spinner -->
+    <div class="page-spinner" id="spinner">
+      <div class="spinner-ring" aria-hidden="true"></div>
+      <span>Loading report data...</span>
+    </div>
+
+    <!-- Table -->
+    <div class="table-wrapper" id="tableWrapper">
+      <table id="reportTable">
+        <thead>
+          <tr>
+            <th>Guest Name</th>
+            <th>Phone</th>
+            <th>Room</th>
+            <th>Check-In</th>
+            <th>Check-Out</th>
+            <th>Nights</th>
+            <th>Guests</th>
+            <th>Rate</th>
+            <th>Total Due</th>
+            <th>Paid (All-time)</th>
+            <th>Paid (Period)</th>
+            <th>Balance</th>
+            <th>Status</th>
+            <th>Receipts (Period)</th>
+            <th>Created By</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody id="reportBody">
+          <tr>
+            <td colspan="16" style="text-align:center; padding:40px; color:var(--text-muted); font-size:14px;">
+              Select a period above and click Load Report.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Footer cards -->
+    <div id="reportFooter"></div>
+
+    <p id="rowCountLabel" class="row-count" style="margin-top:8px;"></p>
+
+  </main>
+
+  <!-- ── Bottom footer with home button ── -->
+  <footer class="sub-page-footer">
+    <a href="index.html" class="home-btn">
+      <span class="material-icons" style="font-size:18px;" aria-hidden="true">home</span>
+      Back to Dashboard
+    </a>
+    <span id="footerRowCount" class="row-count"></span>
+  </footer>
+
+  <script type="module" src="reports.js"></script>
+</body>
+</html>
