@@ -8257,7 +8257,16 @@ async function openExtendReservationModal(reservation) {
         enableExtensionButtons();
 
         ModalManager.close('extendReservationModal');
-        if (extensionReceipt) {
+
+        // Update reservation object with new departure/rate for form preview
+        reservation.departureDate = extensionNewDeparture;
+        if (extensionRate) reservation.rate = extensionRate;
+
+        // Show the full registration form (same as "Print Reservation Form")
+        const cust = customers.find(c => c.id === reservation.customerId);
+        if (cust) {
+          showFormPreview(reservation, cust, cust.idImageUrl || null);
+        } else if (extensionReceipt) {
           printReceipt(extensionReceipt);
         } else {
           alert("Extension saved (no payment). Checkout date updated.");
@@ -10466,7 +10475,32 @@ function buildRegistrationFormHTML(reservation, customer, croppedImageDataURL, p
             <th style="padding:${ledgerPad}; text-align:right;">Paid</th>
             <th style="padding:${ledgerPad}; text-align:right;">Balance After</th>
           </tr>
-          ${paymentSummary.receipts.map(r => {
+          ${(() => {
+            const allR = paymentSummary.receipts;
+            const MAX_MAIN = 5;
+            if (allR.length > MAX_MAIN) {
+              const hidden = allR.slice(0, allR.length - (MAX_MAIN - 1));
+              const hiddenTotal = hidden.reduce((s, r) => s + parseFloat(r.amount), 0);
+              const shown = allR.slice(allR.length - (MAX_MAIN - 1));
+              return `
+              <tr style="border-bottom:1px solid #dee2e6; background:#f0f0f0;">
+                <td colspan="3" style="padding:${ledgerPad}; font-style:italic; color:#666;">${hidden.length} earlier payments</td>
+                <td style="padding:${ledgerPad}; text-align:right; color:#28a745; font-weight:bold;">$${hiddenTotal.toFixed(2)}</td>
+                <td style="padding:${ledgerPad}; text-align:right; color:#666;">—</td>
+              </tr>` + shown.map(r => {
+                const paidAmt = parseFloat(r.amount);
+                const bal = parseFloat(r.balanceAfter || 0);
+                return `
+              <tr style="border-bottom:1px solid #dee2e6;">
+                <td style="padding:${ledgerPad}; font-weight:bold;">${r.number}</td>
+                <td style="padding:${ledgerPad};">${r.date}</td>
+                <td style="padding:${ledgerPad}; text-align:center; text-transform:capitalize;">${r.method}</td>
+                <td style="padding:${ledgerPad}; text-align:right; color:#28a745; font-weight:bold;">$${paidAmt.toFixed(2)}</td>
+                <td style="padding:${ledgerPad}; text-align:right; color:${bal > 0 ? '#dc3545' : '#28a745'}; font-weight:bold;">$${bal.toFixed(2)}</td>
+              </tr>`;
+              }).join('');
+            }
+            return allR.map(r => {
             const paidAmt = parseFloat(r.amount);
             const bal = parseFloat(r.balanceAfter || 0);
             return `
@@ -10477,7 +10511,8 @@ function buildRegistrationFormHTML(reservation, customer, croppedImageDataURL, p
                 <td style="padding:${ledgerPad}; text-align:right; color:#28a745; font-weight:bold;">$${paidAmt.toFixed(2)}</td>
                 <td style="padding:${ledgerPad}; text-align:right; color:${bal > 0 ? '#dc3545' : '#28a745'}; font-weight:bold;">$${bal.toFixed(2)}</td>
               </tr>`;
-          }).join('')}
+          }).join('');
+          })()}
         </table>
         ` : `<div style="font-size:11px; color:#999; text-align:center;">No payments recorded yet</div>`}
         
@@ -10496,14 +10531,9 @@ function buildRegistrationFormHTML(reservation, customer, croppedImageDataURL, p
       </div>
 
       <!-- IMPORTANT INFORMATION -->
-      <div style="padding:${isCompact ? '3px 5px' : '6px 8px'}; background:#fff3cd; border:1px solid #ffc107; border-radius:6px; margin-bottom:${isCompact ? '3' : '6'}px;">
-        ${isCompact ? `
-        <div style="font-size:9px; color:#856404; line-height:1.3;">
-          <strong>Important:</strong> Check-in: <strong>3PM</strong> | Check-out: <strong>1PM</strong> | <strong>$10 USD</strong> security deposit (returned w/ keys) | Guests responsible for damages/missing items | Management not liable for valuables | Rates paid in advance | Extra persons: <strong>$10/person/night</strong> | Late checkout: <strong>20%</strong>/hr | <strong>No refunds</strong>
-        </div>
-        ` : `
-        <h4 style="margin:0 0 2px 0; font-size:13px; color:#856404;">Important Information</h4>
-        <ul style="margin:0; padding-left:16px; font-size:12px; color:#856404; line-height:1.5;">
+      <div style="padding:${isCompact ? '4px 6px' : '6px 8px'}; background:#fff3cd; border:1px solid #ffc107; border-radius:6px; margin-bottom:${isCompact ? '3' : '6'}px;">
+        <h4 style="margin:0 0 2px 0; font-size:${isCompact ? '11' : '13'}px; color:#856404;">Important Information</h4>
+        <ul style="margin:0; padding-left:16px; font-size:${isCompact ? '10' : '12'}px; color:#856404; line-height:${isCompact ? '1.3' : '1.5'};">
           <li>Check-in: <strong>3:00 PM</strong> | Check-out: <strong>1:00 PM</strong></li>
           <li>Guests are responsible for any damages or missing items</li>
           <li><strong>$10 USD</strong> security deposit required (returned when keys are returned)</li>
@@ -10511,7 +10541,6 @@ function buildRegistrationFormHTML(reservation, customer, croppedImageDataURL, p
           <li>All rates must be paid in advance | Extra persons: <strong>$10 USD</strong>/person/night</li>
           <li>Late checkout fee: <strong>20%</strong> of room rate per hour | <strong>No refunds</strong></li>
         </ul>
-        `}
       </div>
 
       ${reservation.note ? `
@@ -10542,12 +10571,12 @@ function buildRegistrationFormHTML(reservation, customer, croppedImageDataURL, p
       </div>
 
       <!-- TEAR-OFF LINE -->
-      <div style="border-top:2px dashed #000; margin:${isCompact ? '3' : '6'}px 0; position:relative;">
+      <div style="border-top:2px dashed #000; margin:${isCompact ? '3' : '6'}px 0; position:relative; page-break-before:auto;">
         <span style="position:absolute; top:-8px; left:15px; background:white; padding:0 8px; font-size:${isCompact ? '8' : '11'}px; font-weight:bold;">TEAR HERE - GUEST COPY</span>
       </div>
 
       <!-- TEAR-OFF RECEIPT -->
-      <div style="border:2px solid #2a4d7a; border-radius:6px; padding:${isCompact ? '3px 5px' : '6px 8px'}; background:#f8f9fa;">
+      <div style="border:2px solid #2a4d7a; border-radius:6px; padding:${isCompact ? '3px 5px' : '6px 8px'}; background:#f8f9fa; page-break-inside:avoid;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:${isCompact ? '2' : '4'}px;">
           <div>
             <strong style="font-size:${isCompact ? '12' : '15'}px; color:#2a4d7a;">Glimbaro Guest House</strong>
@@ -10578,7 +10607,29 @@ function buildRegistrationFormHTML(reservation, customer, croppedImageDataURL, p
               <th style="padding:${ledgerPad}; text-align:right;">Balance</th>
             </tr>
             ${(() => {
-              return paymentSummary.receipts.map(r => {
+              const allR = paymentSummary.receipts;
+              const MAX_TEAROFF = 3;
+              if (allR.length > MAX_TEAROFF) {
+                const hidden = allR.slice(0, allR.length - (MAX_TEAROFF - 1));
+                const hiddenTotal = hidden.reduce((s, r) => s + parseFloat(r.amount), 0);
+                const shown = allR.slice(allR.length - (MAX_TEAROFF - 1));
+                return `
+                <tr style="border-bottom:1px dotted #ccc; background:#f0f0f0;">
+                  <td style="padding:${ledgerPad}; font-style:italic; color:#666;">${hidden.length} earlier payments</td>
+                  <td style="padding:${ledgerPad}; text-align:right; color:#28a745; font-weight:bold;">$${hiddenTotal.toFixed(2)}</td>
+                  <td style="padding:${ledgerPad}; text-align:right; color:#666;">—</td>
+                </tr>` + shown.map(r => {
+                  const paidAmt = parseFloat(r.amount);
+                  const bal = parseFloat(r.balanceAfter || 0);
+                  return `
+                <tr style="border-bottom:1px dotted #ccc;">
+                  <td style="padding:${ledgerPad};"><strong>#${r.number}</strong> <span style="font-size:${isCompact ? '7' : '9'}px;color:#666;">(${r.date})</span></td>
+                  <td style="padding:${ledgerPad}; text-align:right; color:#28a745; font-weight:bold;">$${paidAmt.toFixed(2)}</td>
+                  <td style="padding:${ledgerPad}; text-align:right; color:${bal > 0 ? '#dc3545' : '#28a745'}; font-weight:bold;">$${bal.toFixed(2)}</td>
+                </tr>`;
+                }).join('');
+              }
+              return allR.map(r => {
                 const paidAmt = parseFloat(r.amount);
                 const bal = parseFloat(r.balanceAfter || 0);
                 return `
@@ -10721,8 +10772,10 @@ function buildRegistrationFormHTML(reservation, customer, croppedImageDataURL, p
 //PRINT
 {
   const printReservationBtn = document.getElementById("printReservationBtn");
-  if (printReservationBtn) printReservationBtn.onclick = () => {
-    openPrintPopup(currentReservation);
+  if (printReservationBtn) printReservationBtn.onclick = async () => {
+    if (!currentReservation) return;
+    const customer = customers.find(c => c.id === currentReservation.customerId) || {};
+    await showFormPreview(currentReservation, customer, customer.idImageUrl || null);
   };
 }
 

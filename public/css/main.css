@@ -1898,6 +1898,7 @@
     .modal-content.modal-print {
       width: 8.5in;
       max-width: 95vw;
+      max-height: none;
       height: auto;
       overflow: visible;
       padding: 0;
@@ -2008,7 +2009,7 @@
         overflow: visible !important;
         box-shadow: none !important;
         border: none !important;
-        page-break-inside: avoid !important;
+        page-break-inside: auto !important;
         font-size: inherit !important;
       }
 
@@ -2052,6 +2053,11 @@
       display: none;
     }
 
+    #registrationFormPreviewModal .modal-content {
+      max-height: none !important;
+      overflow: visible !important;
+    }
+
     #registrationFormPreviewModal.show,
     #registrationFormPreviewModal[style*="display: block"],
     #registrationFormPreviewModal[style*="display:block"] {
@@ -2064,15 +2070,16 @@
       margin: 30px auto !important;
       border: none !important;
       max-width: 8.5in !important;
+      max-height: none !important;
       width: 95% !important;
-      overflow: hidden !important;
+      overflow: visible !important;
       border-radius: 8px !important;
       box-shadow: 0 4px 20px rgba(0,0,0,0.15) !important;
     }
 
     .registration-form-page {
       background: white;
-      overflow: hidden !important;
+      overflow: visible !important;
       max-width: 100% !important;
       width: 100% !important;
     }
