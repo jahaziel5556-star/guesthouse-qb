@@ -1108,28 +1108,77 @@
       cursor: pointer;
       font-size: 13px;
       font-weight: 600;
-      color: white;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
       max-width: 100%;
       transition: all 0.2s ease;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
     }
     .availability-grid-table .guest-btn:hover {
       filter: brightness(1.1);
     }
     .availability-grid-table .guest-btn.unpaid {
-      background: #dc2626;
+      background: #fee2e2;
+      color: #991b1b;
     }
     .availability-grid-table .guest-btn.partial {
-      background: #2563eb;
+      background: #fef3c7;
+      color: #92400e;
     }
     .availability-grid-table .guest-btn.paid {
-      background: #059669;
+      background: #d1fae5;
+      color: #065f46;
     }
     [data-theme="dark"] .availability-grid-table .cell-available {
       background: rgba(16, 185, 129, 0.15);
+    }
+
+    /* Dark mode: availability grid guest buttons */
+    [data-theme="dark"] .availability-grid-table .guest-btn.paid {
+      background: #064e3b;
+      color: #6ee7b7;
+    }
+    [data-theme="dark"] .availability-grid-table .guest-btn.partial {
+      background: #78350f;
+      color: #fcd34d;
+    }
+    [data-theme="dark"] .availability-grid-table .guest-btn.unpaid {
+      background: #7f1d1d;
+      color: #fca5a5;
+    }
+
+    /* Dark mode: check status cell backgrounds */
+    [data-theme="dark"] .cell-occupied.checked-in {
+      background: rgba(16, 185, 129, 0.15) !important;
+    }
+    [data-theme="dark"] .cell-occupied.checked-out {
+      background: rgba(107, 114, 128, 0.2) !important;
+    }
+    [data-theme="dark"] .cell-occupied.pending {
+      background: rgba(245, 158, 11, 0.15) !important;
+    }
+
+    /* Dark mode: legend colors (same hues, slightly muted) */
+    [data-theme="dark"] .legend-color.paid-full { background: #059669; }
+    [data-theme="dark"] .legend-color.paid-deposit { background: #2563eb; }
+    [data-theme="dark"] .legend-color.unpaid { background: #dc2626; }
+
+    /* Dark mode: room status cards */
+    [data-theme="dark"] .room-card.available {
+      background: rgba(16, 185, 129, 0.12);
+      border-color: #059669;
+    }
+    [data-theme="dark"] .room-card.occupied {
+      background: rgba(239, 68, 68, 0.12);
+      border-color: #dc2626;
+    }
+    [data-theme="dark"] .room-card.checkout-today {
+      background: rgba(245, 158, 11, 0.12);
+      border-color: #d97706;
+    }
+    [data-theme="dark"] .room-card.maintenance {
+      background: rgba(139, 92, 246, 0.12);
+      border-color: #7c3aed;
     }
 
     /* ═══════════════════════════════════════════════════════════════
@@ -1979,28 +2028,44 @@
       transform: translateY(-1px);
     }
     .room-pick-btn.selected {
-      border-color: var(--accent-primary);
-      background: var(--accent-primary);
+      border-color: #059669;
+      background: #10b981;
       color: #fff;
-      box-shadow: 0 2px 8px rgba(74, 144, 226, 0.35);
+      box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);
     }
     .room-pick-btn.selected .room-pick-type {
       color: rgba(255,255,255,0.8);
     }
+    .room-pick-btn.available-room {
+      border-color: #10b981;
+      background: rgba(16, 185, 129, 0.1);
+      color: var(--text-primary);
+    }
+    .room-pick-btn.available-room:hover {
+      background: rgba(16, 185, 129, 0.2);
+      border-color: #059669;
+    }
     .room-pick-btn.unavailable {
-      opacity: 0.4;
+      border-color: #ef4444;
+      background: rgba(239, 68, 68, 0.1);
+      color: var(--text-muted);
       cursor: not-allowed;
-      background: var(--bg-tertiary);
-      border-color: var(--border-light);
-      text-decoration: line-through;
     }
     .room-pick-btn.unavailable::after {
-      content: 'Booked';
+      content: 'Occupied';
       position: absolute;
-      bottom: 2px;
+      bottom: 1px;
       font-size: 0.55em;
       font-weight: 600;
-      color: var(--accent-danger);
+      color: #ef4444;
+    }
+    [data-theme="dark"] .room-pick-btn.available-room {
+      background: rgba(16, 185, 129, 0.15);
+      border-color: #10b981;
+    }
+    [data-theme="dark"] .room-pick-btn.unavailable {
+      background: rgba(239, 68, 68, 0.15);
+      border-color: #ef4444;
     }
 
     /* Print modal - special sizing for forms */

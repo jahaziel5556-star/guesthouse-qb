@@ -4301,7 +4301,11 @@ function validateDates(arrival, departure) {
         btn.type = 'button';
         btn.className = 'room-pick-btn';
         const isBooked = bookedRooms.includes(roomNum);
-        if (isBooked) btn.classList.add('unavailable');
+        if (isBooked) {
+          btn.classList.add('unavailable');
+        } else {
+          btn.classList.add('available-room');
+        }
         if (roomInput.value === roomNum) btn.classList.add('selected');
         btn.innerHTML = `<span>${roomNum}</span>`;
 
@@ -9390,44 +9394,61 @@ function showReceiptDetailModal(payment, reservation) {
     }
     
     errorDiv.style.display = "none";
-    
-    // Use cached payments if available, otherwise fetch
-    let allPayments = window._allPaymentsCache || [];
-    if (allPayments.length === 0) {
-      const paymentsSnapshot = await getDocs(collection(db, "payments"));
-      allPayments = paymentsSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-    }
-    
-    // Flexible matching: strip leading zeros and compare
-    const searchNum = receiptInput.replace(/^0+/, '') || '0';
-    const searchPadded = receiptInput.padStart(5, '0');
-    
-    const payment = allPayments.find(p => {
-      if (!p.receiptNumber) return false;
-      const pNum = String(p.receiptNumber).replace(/^0+/, '') || '0';
-      return pNum === searchNum || p.receiptNumber === searchPadded || p.receiptNumber === receiptInput;
-    });
-    
-    if (!payment) {
-      errorDiv.textContent = `Receipt #${receiptInput} not found. Try without leading zeros.`;
-      errorDiv.style.display = "block";
-      return;
-    }
-    
-    // Get reservation details
-    let reservation = null;
-    if (payment.reservationId) {
-      const reservations = window._reservationsCache || [];
-      reservation = reservations.find(r => r.id === payment.reservationId);
-      if (!reservation) {
-        const resDoc = await getDoc(doc(db, "reservations", payment.reservationId));
-        reservation = resDoc.exists() ? { id: resDoc.id, ...resDoc.data() } : null;
+
+    // Show loading state
+    const origText = submitSearchReceiptBtn.innerHTML;
+    submitSearchReceiptBtn.disabled = true;
+    submitSearchReceiptBtn.innerHTML = 'Searching...';
+
+    try {
+      // Always fetch fresh from Firestore to ensure latest data
+      let allPayments = window._allPaymentsCache || [];
+      if (allPayments.length === 0) {
+        const paymentsSnapshot = await getDocs(collection(db, "payments"));
+        allPayments = paymentsSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
       }
+      
+      // Flexible matching: strip leading zeros, non-numeric chars, and compare
+      const cleanInput = receiptInput.replace(/[^0-9]/g, '');
+      const searchNum = cleanInput.replace(/^0+/, '') || '0';
+      const searchPadded = cleanInput.padStart(5, '0');
+      
+      const payment = allPayments.find(p => {
+        if (!p.receiptNumber) return false;
+        const rn = String(p.receiptNumber);
+        const cleanRn = rn.replace(/[^0-9]/g, '');
+        const pNum = cleanRn.replace(/^0+/, '') || '0';
+        return pNum === searchNum || rn === searchPadded || rn === receiptInput || cleanRn === cleanInput;
+      });
+      
+      if (!payment) {
+        errorDiv.textContent = `Receipt #${receiptInput} not found.`;
+        errorDiv.style.display = "block";
+        return;
+      }
+      
+      // Get reservation details
+      let reservation = null;
+      if (payment.reservationId) {
+        const reservations = window._reservationsCache || [];
+        reservation = reservations.find(r => r.id === payment.reservationId);
+        if (!reservation) {
+          const resDoc = await getDoc(doc(db, "reservations", payment.reservationId));
+          reservation = resDoc.exists() ? { id: resDoc.id, ...resDoc.data() } : null;
+        }
+      }
+      
+      // Close search modal and show receipt details
+      ModalManager.close('searchReceiptModal');
+      showReceiptDetailModal(payment, reservation);
+    } catch (err) {
+      console.error('Receipt search error:', err);
+      errorDiv.textContent = 'Search failed. Please try again.';
+      errorDiv.style.display = "block";
+    } finally {
+      submitSearchReceiptBtn.disabled = false;
+      submitSearchReceiptBtn.innerHTML = origText;
     }
-    
-    // Close search modal and show receipt details
-    ModalManager.close('searchReceiptModal');
-    showReceiptDetailModal(payment, reservation);
   };
 }
 
