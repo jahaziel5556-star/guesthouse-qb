@@ -4272,10 +4272,19 @@ function validateDates(arrival, departure) {
   function getBookedRooms() {
     const arrival = document.getElementById('arrival')?.value;
     const departure = document.getElementById('departure')?.value;
-    if (!arrival || !departure) return [];
     const reservations = window._reservationsCache || [];
+    
+    if (arrival && departure) {
+      // Date range overlap check
+      return reservations
+        .filter(r => r.arrivalDate < departure && r.departureDate > arrival)
+        .map(r => r.roomNumber);
+    }
+    
+    // No dates yet — show currently occupied rooms (active today)
+    const today = new Date().toISOString().split('T')[0];
     return reservations
-      .filter(r => r.arrivalDate < departure && r.departureDate > arrival)
+      .filter(r => r.arrivalDate <= today && r.departureDate > today)
       .map(r => r.roomNumber);
   }
 
