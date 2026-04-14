@@ -81,8 +81,12 @@ const APP_CONFIG = {
     FLOOR_1: ['101', '102', '103', '104', '105', '106', '107', '108', '109', '110', '111'],
     // First floor rooms (200 series)
     FLOOR_2: ['201', '202', '203', '204', '205', '206', '207', '208', '209', '210'],
-    // Combined list for validation
-    get ALL() { return [...this.FLOOR_1, ...this.FLOOR_2]; }
+    // Room types: double rooms listed here, everything else is single
+    DOUBLE: ['103', '107', '111', '205', '210'],
+    // Helper methods
+    get ALL() { return [...this.FLOOR_1, ...this.FLOOR_2]; },
+    getType(room) { return this.DOUBLE.includes(room) ? 'double' : 'single'; },
+    getByType(type) { return this.ALL.filter(r => this.getType(r) === type); }
   },
   
   // ─── Timing Configuration ───────────────────────────────────────────────────
@@ -2191,7 +2195,6 @@ async function bulkResyncToQuickBooks(lastSentReceiptNumber = 0) {
     return;
   }
 
-  // Prevent concurrent sync operations
   if (_qbSyncInProgress) {
     alert("A QuickBooks sync is already in progress. Please wait for it to finish.");
     return;
@@ -2199,16 +2202,13 @@ async function bulkResyncToQuickBooks(lastSentReceiptNumber = 0) {
   _qbSyncInProgress = true;
 
   try {
-    // Get all payments from Firestore
     const paymentsSnapshot = await getDocs(collection(db, "payments"));
     const allPayments = paymentsSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
     
-    // Filter payments with receipt numbers > lastSentReceiptNumber that aren't synced
-    // Only include payments that have an explicit non-synced status (not old payments missing the field)
     const unsentPayments = allPayments.filter(p => {
       if (p.voided) return false;
       if (p.qbSyncStatus === 'synced') return false;
-      if (!p.qbSyncStatus) return false; // Skip old payments without tracking
+      if (!p.qbSyncStatus) return false;
       const receiptNum = parseInt(p.receiptNumber?.replace(/\D/g, '') || '0', 10);
       return receiptNum > lastSentReceiptNumber;
     });
@@ -2218,7 +2218,6 @@ async function bulkResyncToQuickBooks(lastSentReceiptNumber = 0) {
       return;
     }
 
-    // Sort by receipt number for orderly processing
     unsentPayments.sort((a, b) => {
       const numA = parseInt(a.receiptNumber?.replace(/\D/g, '') || '0', 10);
       const numB = parseInt(b.receiptNumber?.replace(/\D/g, '') || '0', 10);
@@ -2228,15 +2227,28 @@ async function bulkResyncToQuickBooks(lastSentReceiptNumber = 0) {
     const receiptList = unsentPayments.map(p => p.receiptNumber).join(', ');
     const confirmMsg = `Found ${unsentPayments.length} unsent receipt(s) after #${lastSentReceiptNumber}:\n${receiptList}\n\nProceed with bulk resync to QuickBooks?`;
     
-    if (!confirm(confirmMsg)) return;
+    if (!confirm(confirmMsg)) {
+      _qbSyncInProgress = false;
+      return;
+    }
+
+    // Pre-load reservation data
+    const reservationIds = [...new Set(unsentPayments.map(p => p.reservationId).filter(Boolean))];
+    const reservationCache = {};
+    for (let i = 0; i < reservationIds.length; i += 10) {
+      const batch = reservationIds.slice(i, i + 10);
+      const results = await Promise.all(batch.map(id => getDoc(doc(db, "reservations", id))));
+      results.forEach(snap => {
+        if (snap.exists()) reservationCache[snap.id] = { id: snap.id, ...snap.data() };
+      });
+    }
 
     let successCount = 0;
     let failCount = 0;
     let skippedCount = 0;
     const results = [];
 
-    for (const payment of unsentPayments) {
-      // Re-fetch before each send to prevent duplicates (another tab may have synced it)
+    const processSingle = async (payment) => {
       try {
         const freshDoc = await getDoc(doc(db, "payments", payment.id));
         if (freshDoc.exists()) {
@@ -2244,12 +2256,12 @@ async function bulkResyncToQuickBooks(lastSentReceiptNumber = 0) {
           if (freshData.qbSyncStatus === 'synced') {
             skippedCount++;
             results.push(`⏭️ ${payment.receiptNumber} (already synced)`);
-            continue;
+            return;
           }
           if (freshData.voided || freshData.qbSyncStatus === 'voided') {
             skippedCount++;
             results.push(`⏭️ ${payment.receiptNumber} (voided)`);
-            continue;
+            return;
           }
         }
       } catch (e) {
@@ -2257,15 +2269,9 @@ async function bulkResyncToQuickBooks(lastSentReceiptNumber = 0) {
       }
 
       try {
-        let reservation = null;
-        if (payment.reservationId) {
-          const reservationSnap = await getDoc(doc(db, "reservations", payment.reservationId));
-          reservation = reservationSnap.exists() ? { id: reservationSnap.id, ...reservationSnap.data() } : null;
-        }
-
+        const reservation = reservationCache[payment.reservationId] || null;
         const customer = customers.find(c => c.id === payment.customerId) || null;
         const qbData = buildQuickBooksPaymentData(payment, reservation, customer);
-
         const result = await sendToQuickBooks(qbData);
 
         await updateDoc(doc(db, "payments", payment.id), {
@@ -2274,14 +2280,10 @@ async function bulkResyncToQuickBooks(lastSentReceiptNumber = 0) {
           qbSyncError: null,
           ...(result?.duplicate ? { qbSyncNote: 'Already existed in QuickBooks' } : {})
         });
-
         successCount++;
         results.push(`✅ ${payment.receiptNumber}${result?.duplicate ? ' (already in QB)' : ''}`);
-        console.log(`✅ Synced receipt ${payment.receiptNumber} to QuickBooks`);
-
       } catch (err) {
         const errMsg = err.message || '';
-        // If QB says receipt already exists, mark as synced (it got through before)
         if (/already exists|Duplicate|DocNumber/i.test(errMsg)) {
           await updateDoc(doc(db, "payments", payment.id), {
             qbSyncStatus: 'synced',
@@ -2295,7 +2297,6 @@ async function bulkResyncToQuickBooks(lastSentReceiptNumber = 0) {
           failCount++;
           results.push(`❌ ${payment.receiptNumber}: ${errMsg}`);
           console.error(`❌ Failed to sync receipt ${payment.receiptNumber}:`, err);
-
           await updateDoc(doc(db, "payments", payment.id), {
             qbSyncStatus: 'failed',
             qbSyncError: errMsg || 'Unknown error',
@@ -2303,6 +2304,13 @@ async function bulkResyncToQuickBooks(lastSentReceiptNumber = 0) {
           });
         }
       }
+    };
+
+    // Process in parallel batches of 5
+    const BATCH_SIZE = 5;
+    for (let i = 0; i < unsentPayments.length; i += BATCH_SIZE) {
+      const batch = unsentPayments.slice(i, i + BATCH_SIZE);
+      await Promise.all(batch.map(processSingle));
     }
 
     const summary = `Bulk Resync Complete!\n\n✅ Success: ${successCount}\n❌ Failed: ${failCount}\n⏭️ Skipped: ${skippedCount}\n\nDetails:\n${results.join('\n')}`;
@@ -2325,8 +2333,7 @@ window.bulkResyncToQuickBooks = bulkResyncToQuickBooks;
 
 /**
  * Send all UNSENT receipts to QuickBooks
- * This is a safer alternative to bulkResync - it only sends receipts that haven't been synced yet
- * Prevents duplicates by checking qbSyncStatus before sending
+ * Uses parallel batching (5 concurrent) for speed while respecting QB rate limits
  */
 async function sendUnsentToQuickBooks(startFromReceipt = 0) {
   // Prevent concurrent sync operations
@@ -2336,21 +2343,24 @@ async function sendUnsentToQuickBooks(startFromReceipt = 0) {
   }
   _qbSyncInProgress = true;
 
+  // Progress UI helper
+  const progressEl = document.getElementById('qbSyncProgress');
+  const updateProgress = (current, total, lastReceipt) => {
+    if (progressEl) {
+      progressEl.textContent = `Syncing ${current}/${total}... (Receipt #${lastReceipt || '?'})`;
+    }
+  };
+
   try {
     // Get all payments from Firestore
     const paymentsSnapshot = await getDocs(collection(db, "payments"));
     const allPayments = paymentsSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
     
-    // Filter to only unsent payments (explicitly pending/failed, not voided)
-    // IMPORTANT: Skip payments with no qbSyncStatus at all — those are old payments
-    // created before sync tracking was added and were likely already sent to QB manually.
+    // Filter to only unsent payments
     const unsentPayments = allPayments.filter(p => {
       if (p.voided) return false;
       if (p.qbSyncStatus === 'synced') return false;
-      // Only include payments that have an explicit pending/failed/queued status
-      // Payments with no qbSyncStatus field are old and should NOT be re-sent
       if (!p.qbSyncStatus) return false;
-      // If startFromReceipt is set, only include receipts >= that number
       if (startFromReceipt > 0) {
         const receiptNum = parseInt(p.receiptNumber?.replace(/\D/g, '') || '0', 10);
         if (receiptNum < startFromReceipt) return false;
@@ -2363,7 +2373,7 @@ async function sendUnsentToQuickBooks(startFromReceipt = 0) {
       return { success: true, sent: 0, message: 'All receipts already synced' };
     }
 
-    // Sort by receipt number for orderly processing
+    // Sort by receipt number
     unsentPayments.sort((a, b) => {
       const numA = parseInt(a.receiptNumber?.replace(/\D/g, '') || '0', 10);
       const numB = parseInt(b.receiptNumber?.replace(/\D/g, '') || '0', 10);
@@ -2374,34 +2384,45 @@ async function sendUnsentToQuickBooks(startFromReceipt = 0) {
     const moreText = unsentPayments.length > 10 ? `...and ${unsentPayments.length - 10} more` : '';
     const confirmMsg = `Found ${unsentPayments.length} unsent receipt(s):\n${receiptList}${moreText}\n\nSend to QuickBooks?`;
     
-    if (!confirm(confirmMsg)) return { success: false, cancelled: true };
+    if (!confirm(confirmMsg)) {
+      _qbSyncInProgress = false;
+      return { success: false, cancelled: true };
+    }
+
+    // Pre-load all reservation data in one pass (avoid N+1 queries)
+    const reservationIds = [...new Set(unsentPayments.map(p => p.reservationId).filter(Boolean))];
+    const reservationCache = {};
+    // Batch Firestore reads in groups of 10 (Firestore 'in' query limit)
+    for (let i = 0; i < reservationIds.length; i += 10) {
+      const batch = reservationIds.slice(i, i + 10);
+      const promises = batch.map(id => getDoc(doc(db, "reservations", id)));
+      const results = await Promise.all(promises);
+      results.forEach(snap => {
+        if (snap.exists()) reservationCache[snap.id] = { id: snap.id, ...snap.data() };
+      });
+    }
 
     let successCount = 0;
     let failCount = 0;
     let skippedCount = 0;
+    let processed = 0;
 
-    for (const payment of unsentPayments) {
-      // Re-fetch: check synced AND voided before each send
+    // Process a single payment
+    const processSingle = async (payment) => {
+      // Re-fetch to check for concurrent changes
       const freshPayment = await getDoc(doc(db, "payments", payment.id));
       if (freshPayment.exists()) {
         const freshData = freshPayment.data();
-        if (freshData.qbSyncStatus === 'synced') {
+        if (freshData.qbSyncStatus === 'synced' || freshData.voided || freshData.qbSyncStatus === 'voided') {
           skippedCount++;
-          continue;
-        }
-        if (freshData.voided || freshData.qbSyncStatus === 'voided') {
-          skippedCount++;
-          continue;
+          processed++;
+          updateProgress(processed, unsentPayments.length, payment.receiptNumber);
+          return;
         }
       }
 
       try {
-        let reservation = null;
-        if (payment.reservationId) {
-          const reservationSnap = await getDoc(doc(db, "reservations", payment.reservationId));
-          reservation = reservationSnap.exists() ? { id: reservationSnap.id, ...reservationSnap.data() } : null;
-        }
-
+        const reservation = reservationCache[payment.reservationId] || null;
         const customer = customers.find(c => c.id === payment.customerId) || null;
         const qbData = buildQuickBooksPaymentData(payment, reservation, customer);
 
@@ -2415,10 +2436,8 @@ async function sendUnsentToQuickBooks(startFromReceipt = 0) {
         });
 
         successCount++;
-
       } catch (err) {
         const errMsg = err.message || '';
-        // If QB says receipt already exists, mark as synced
         if (/already exists|Duplicate|DocNumber/i.test(errMsg)) {
           await updateDoc(doc(db, "payments", payment.id), {
             qbSyncStatus: 'synced',
@@ -2430,7 +2449,6 @@ async function sendUnsentToQuickBooks(startFromReceipt = 0) {
         } else {
           failCount++;
           console.error(`❌ Failed to sync receipt ${payment.receiptNumber}:`, err);
-
           await updateDoc(doc(db, "payments", payment.id), {
             qbSyncStatus: 'failed',
             qbSyncError: errMsg || 'Unknown error',
@@ -2438,6 +2456,15 @@ async function sendUnsentToQuickBooks(startFromReceipt = 0) {
           });
         }
       }
+      processed++;
+      updateProgress(processed, unsentPayments.length, payment.receiptNumber);
+    };
+
+    // Process in parallel batches of 5
+    const BATCH_SIZE = 5;
+    for (let i = 0; i < unsentPayments.length; i += BATCH_SIZE) {
+      const batch = unsentPayments.slice(i, i + BATCH_SIZE);
+      await Promise.all(batch.map(processSingle));
     }
 
     const message = `QuickBooks Sync Complete!\n\n✅ Sent: ${successCount}\n❌ Failed: ${failCount}\n⏭️ Skipped: ${skippedCount}`;
@@ -2452,6 +2479,7 @@ async function sendUnsentToQuickBooks(startFromReceipt = 0) {
     return { success: false, error: err.message };
   } finally {
     _qbSyncInProgress = false;
+    if (progressEl) progressEl.textContent = '';
   }
 }
 
@@ -4230,6 +4258,105 @@ function validateDates(arrival, departure) {
 }
 
 // ===========================================================================
+// ROOM TYPE SELECTOR & VISUAL ROOM PICKER
+// ===========================================================================
+{
+  const roomTypeSingleBtn = document.getElementById('roomTypeSingleBtn');
+  const roomTypeDoubleBtn = document.getElementById('roomTypeDoubleBtn');
+  const roomPickerContainer = document.getElementById('roomPickerContainer');
+  const roomPickerGrid = document.getElementById('roomPickerGrid');
+  const roomInput = document.getElementById('room');
+
+  let selectedRoomType = null;
+
+  function getBookedRooms() {
+    const arrival = document.getElementById('arrival')?.value;
+    const departure = document.getElementById('departure')?.value;
+    if (!arrival || !departure) return [];
+    const reservations = window._reservationsCache || [];
+    return reservations
+      .filter(r => r.arrivalDate < departure && r.departureDate > arrival)
+      .map(r => r.roomNumber);
+  }
+
+  function populateRoomPicker(type) {
+    if (!roomPickerGrid) return;
+    roomPickerGrid.innerHTML = '';
+    const bookedRooms = getBookedRooms();
+    const rooms = APP_CONFIG.ROOMS.getByType(type);
+
+    // Group by floor
+    const floor1 = rooms.filter(r => r.startsWith('1'));
+    const floor2 = rooms.filter(r => r.startsWith('2'));
+
+    const renderFloor = (label, floorRooms) => {
+      if (floorRooms.length === 0) return;
+      const floorLabel = document.createElement('div');
+      floorLabel.className = 'room-picker-floor-label';
+      floorLabel.textContent = label;
+      roomPickerGrid.appendChild(floorLabel);
+
+      floorRooms.forEach(roomNum => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'room-pick-btn';
+        const isBooked = bookedRooms.includes(roomNum);
+        if (isBooked) btn.classList.add('unavailable');
+        if (roomInput.value === roomNum) btn.classList.add('selected');
+        btn.innerHTML = `<span>${roomNum}</span>`;
+
+        if (!isBooked) {
+          btn.addEventListener('click', () => {
+            roomPickerGrid.querySelectorAll('.room-pick-btn.selected').forEach(b => b.classList.remove('selected'));
+            btn.classList.add('selected');
+            roomInput.value = roomNum;
+          });
+        }
+        roomPickerGrid.appendChild(btn);
+      });
+    };
+
+    renderFloor('Ground Floor', floor1);
+    renderFloor('First Floor', floor2);
+
+    roomPickerContainer.style.display = '';
+  }
+
+  function selectRoomType(type) {
+    selectedRoomType = type;
+    roomTypeSingleBtn?.classList.toggle('active', type === 'single');
+    roomTypeDoubleBtn?.classList.toggle('active', type === 'double');
+    // Clear previous room selection when switching type
+    const currentRoom = roomInput?.value;
+    if (currentRoom && APP_CONFIG.ROOMS.getType(currentRoom) !== type) {
+      roomInput.value = '';
+    }
+    populateRoomPicker(type);
+  }
+
+  roomTypeSingleBtn?.addEventListener('click', () => selectRoomType('single'));
+  roomTypeDoubleBtn?.addEventListener('click', () => selectRoomType('double'));
+
+  // Re-render room availability when dates change
+  document.getElementById('arrival')?.addEventListener('change', () => {
+    if (selectedRoomType) populateRoomPicker(selectedRoomType);
+  });
+  document.getElementById('departure')?.addEventListener('change', () => {
+    if (selectedRoomType) populateRoomPicker(selectedRoomType);
+  });
+
+  // When clearing the form, reset room picker
+  document.getElementById('clearReservationFormBtn')?.addEventListener('click', () => {
+    selectedRoomType = null;
+    roomTypeSingleBtn?.classList.remove('active');
+    roomTypeDoubleBtn?.classList.remove('active');
+    if (roomPickerContainer) roomPickerContainer.style.display = 'none';
+    if (roomPickerGrid) roomPickerGrid.innerHTML = '';
+    if (roomInput) roomInput.value = '';
+  });
+}
+
+// ===========================================================================
 // SAVE RESERVATION BUTTON HANDLER
 // ===========================================================================
 
@@ -4242,12 +4369,12 @@ document.getElementById("saveReservationBtn")?.addEventListener("click", async (
   const saveBtn = document.getElementById("saveReservationBtn");
   if (saveBtn.disabled) return;
   saveBtn.disabled = true;
-  const originalText = saveBtn.textContent;
-  saveBtn.textContent = "Saving...";
+  const originalHTML = saveBtn.innerHTML;
+  saveBtn.innerHTML = '<span class="material-icons" aria-hidden="true">hourglass_empty</span> Saving...';
 
   const resetSaveButton = () => {
     saveBtn.disabled = false;
-    saveBtn.textContent = originalText;
+    saveBtn.innerHTML = originalHTML;
   };
 
   const name = document.getElementById("name").value.trim();

@@ -1893,7 +1893,116 @@
     .error-message.visible {
       display: block;
     }
-    
+
+    /* ═══════════════════════════════════════════════════════════════
+       ROOM TYPE SELECTOR & VISUAL ROOM PICKER
+       ═══════════════════════════════════════════════════════════════ */
+    .room-type-selector {
+      display: flex;
+      gap: 10px;
+    }
+    .room-type-btn {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 12px 16px;
+      border: 2px solid var(--border-medium);
+      border-radius: var(--radius-md);
+      background: var(--bg-secondary);
+      color: var(--text-secondary);
+      font-size: 0.95em;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .room-type-btn:hover {
+      border-color: var(--accent-primary);
+      color: var(--accent-primary);
+      background: var(--bg-tertiary);
+    }
+    .room-type-btn.active {
+      border-color: var(--accent-primary);
+      background: var(--accent-primary);
+      color: #fff;
+      box-shadow: 0 2px 8px rgba(74, 144, 226, 0.3);
+    }
+    .room-type-btn .material-icons {
+      font-size: 22px;
+    }
+
+    .room-picker-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+      gap: 8px;
+    }
+    .room-picker-floor-label {
+      grid-column: 1 / -1;
+      font-size: 0.78em;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 4px 0 2px;
+      border-bottom: 1px solid var(--border-light);
+      margin-top: 4px;
+    }
+    .room-picker-floor-label:first-child {
+      margin-top: 0;
+    }
+    .room-pick-btn {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 10px 6px;
+      border: 2px solid var(--border-medium);
+      border-radius: var(--radius-md);
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      font-size: 1em;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      position: relative;
+    }
+    .room-pick-btn .room-pick-type {
+      font-size: 0.65em;
+      font-weight: 500;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+    .room-pick-btn:hover:not(.unavailable) {
+      border-color: var(--accent-primary);
+      background: var(--bg-tertiary);
+      transform: translateY(-1px);
+    }
+    .room-pick-btn.selected {
+      border-color: var(--accent-primary);
+      background: var(--accent-primary);
+      color: #fff;
+      box-shadow: 0 2px 8px rgba(74, 144, 226, 0.35);
+    }
+    .room-pick-btn.selected .room-pick-type {
+      color: rgba(255,255,255,0.8);
+    }
+    .room-pick-btn.unavailable {
+      opacity: 0.4;
+      cursor: not-allowed;
+      background: var(--bg-tertiary);
+      border-color: var(--border-light);
+      text-decoration: line-through;
+    }
+    .room-pick-btn.unavailable::after {
+      content: 'Booked';
+      position: absolute;
+      bottom: 2px;
+      font-size: 0.55em;
+      font-weight: 600;
+      color: var(--accent-danger);
+    }
+
     /* Print modal - special sizing for forms */
     .modal-content.modal-print {
       width: 8.5in;

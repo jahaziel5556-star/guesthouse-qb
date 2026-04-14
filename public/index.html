@@ -93,7 +93,7 @@
   <!-- ═══════════════════════════════════════════════════════════════════════
        EXTERNAL STYLESHEET - Separated for maintainability
        ═══════════════════════════════════════════════════════════════════════ -->
-  <link rel="stylesheet" href="css/main.css?v=20260326">
+  <link rel="stylesheet" href="css/main.css?v=20260414">
 </head>
 <body data-theme="light">
 
@@ -534,10 +534,33 @@
               <label for="departure">Departure Date <span class="sr-only">(required)</span></label>
               <input type="date" id="departure" required aria-required="true" />
             </div>
-            <div class="compact-group">
-              <label for="room">Room Number <span class="sr-only">(required)</span></label>
-              <input type="text" id="room" required aria-required="true" />
+
+            <!-- Room Type Selector -->
+            <div class="compact-group full-width">
+              <label>Room Type <span class="sr-only">(required)</span></label>
+              <div class="room-type-selector" id="roomTypeSelector">
+                <button type="button" class="room-type-btn" data-type="single" id="roomTypeSingleBtn">
+                  <span class="material-icons" aria-hidden="true">single_bed</span>
+                  <span>Single</span>
+                </button>
+                <button type="button" class="room-type-btn" data-type="double" id="roomTypeDoubleBtn">
+                  <span class="material-icons" aria-hidden="true">king_bed</span>
+                  <span>Double</span>
+                </button>
+              </div>
             </div>
+
+            <!-- Visual Room Picker (populated by JS) -->
+            <div class="compact-group full-width" id="roomPickerContainer" style="display:none;">
+              <label>Select Room <span class="sr-only">(required)</span></label>
+              <div class="room-picker-grid" id="roomPickerGrid">
+                <!-- Rooms injected by JS -->
+              </div>
+            </div>
+
+            <!-- Hidden room input for form value -->
+            <input type="hidden" id="room" required aria-required="true" />
+
             <div class="compact-group">
               <label for="reservationRate">Rate per Night ($) <span class="sr-only">(required)</span></label>
               <input type="number" id="reservationRate" min="0" step="0.01" required aria-required="true" />
@@ -1685,6 +1708,6 @@
   </script>
 
   <!-- Main Application Script -->
-  <script type="module" src="main1.js?v=20260326b"></script>
+  <script type="module" src="main1.js?v=20260414"></script>
 </body>
 </html>
