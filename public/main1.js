@@ -1776,8 +1776,10 @@ waitForSignedInUser().then(() => {
       (docSnap) => {
         if (docSnap.exists()) {
           maintenanceRooms = docSnap.data().rooms || [];
+          maintenanceReasons = docSnap.data().reasons || {};
         } else {
           maintenanceRooms = [];
+          maintenanceReasons = {};
         }
         Logger.debug("🔧 Live maintenance update:", maintenanceRooms.length, "rooms");
         debouncedDashboardUpdate();
@@ -3909,6 +3911,7 @@ let latestCustomerId = null;
 
 // 🔧 Maintenance Rooms (stored in Firestore settings/maintenance)
 let maintenanceRooms = [];
+let maintenanceReasons = {}; // { roomNumber: "reason string" }
 
 async function loadMaintenanceRooms() {
   try {
@@ -3916,33 +3919,39 @@ async function loadMaintenanceRooms() {
     const docSnap = await getDoc(docRef);
     if (docSnap.exists()) {
       maintenanceRooms = docSnap.data().rooms || [];
+      maintenanceReasons = docSnap.data().reasons || {};
     } else {
       maintenanceRooms = [];
+      maintenanceReasons = {};
     }
   } catch (e) {
     console.warn("Could not load maintenance rooms:", e);
     maintenanceRooms = [];
+    maintenanceReasons = {};
   }
 }
 
 async function saveMaintenanceRooms() {
   try {
     const docRef = doc(db, "settings", "maintenance");
-    await updateDoc(docRef, { rooms: maintenanceRooms }).catch(async () => {
+    const data = { rooms: maintenanceRooms, reasons: maintenanceReasons };
+    await updateDoc(docRef, data).catch(async () => {
       // If doc doesn't exist, create it
       const { setDoc } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
-      await setDoc(docRef, { rooms: maintenanceRooms });
+      await setDoc(docRef, data);
     });
   } catch (e) {
     console.error("Could not save maintenance rooms:", e);
   }
 }
 
-function toggleMaintenanceRoom(roomNumber) {
+function toggleMaintenanceRoom(roomNumber, reason) {
   if (maintenanceRooms.includes(roomNumber)) {
     maintenanceRooms = maintenanceRooms.filter(r => r !== roomNumber);
+    delete maintenanceReasons[roomNumber];
   } else {
     maintenanceRooms.push(roomNumber);
+    if (reason) maintenanceReasons[roomNumber] = reason;
   }
   saveMaintenanceRooms();
 }
@@ -4052,24 +4061,44 @@ function openMaintenanceModal(roomNumber) {
     guestInfoSection.style.display = 'none';
   }
   
+  // Maintenance reason UI
+  const reasonSection = document.getElementById('maintenanceReasonSection');
+  const reasonInput = document.getElementById('maintenanceReasonInput');
+  const reasonDisplay = document.getElementById('maintenanceReasonDisplay');
+  const reasonText = document.getElementById('maintenanceReasonText');
+  const existingReason = maintenanceReasons[roomNumber] || '';
+
   // Maintenance status
   if (isUnderMaintenance) {
     statusText.textContent = 'This room is currently under maintenance.';
     toggleBtn.textContent = 'Remove from Maintenance';
     toggleBtn.style.background = 'var(--accent-success, #10b981)';
+    // Show existing reason, hide input
+    if (reasonSection) reasonSection.style.display = 'none';
+    if (reasonDisplay && existingReason) {
+      reasonDisplay.style.display = 'block';
+      reasonText.textContent = existingReason;
+    } else if (reasonDisplay) {
+      reasonDisplay.style.display = 'none';
+    }
   } else {
     statusText.textContent = activeReservation 
       ? 'Room is occupied. You can still set it for maintenance after checkout.'
       : 'Set this room as under maintenance?';
     toggleBtn.textContent = 'Set Under Maintenance';
     toggleBtn.style.background = '#8b5cf6';
+    // Show reason input, hide display
+    if (reasonSection) reasonSection.style.display = 'block';
+    if (reasonInput) reasonInput.value = '';
+    if (reasonDisplay) reasonDisplay.style.display = 'none';
   }
   
   ModalManager.open('maintenanceModal');
   
   // Event handlers
   const handleToggle = async () => {
-    toggleMaintenanceRoom(roomNumber);
+    const reason = reasonInput ? reasonInput.value.trim() : '';
+    toggleMaintenanceRoom(roomNumber, reason);
     ModalManager.close('maintenanceModal');
     try { await fillDashboard(); } catch (e) { console.error('Dashboard refresh failed:', e); }
   };
@@ -4310,15 +4339,18 @@ function validateDates(arrival, departure) {
         btn.type = 'button';
         btn.className = 'room-pick-btn';
         const isBooked = bookedRooms.includes(roomNum);
+        const isMaintenance = maintenanceRooms.includes(roomNum);
         if (isBooked) {
           btn.classList.add('unavailable');
+        } else if (isMaintenance) {
+          btn.classList.add('maintenance-room');
         } else {
           btn.classList.add('available-room');
         }
         if (roomInput.value === roomNum) btn.classList.add('selected');
         btn.innerHTML = `<span>${roomNum}</span>`;
 
-        if (!isBooked) {
+        if (!isBooked && !isMaintenance) {
           btn.addEventListener('click', () => {
             roomPickerGrid.querySelectorAll('.room-pick-btn.selected').forEach(b => b.classList.remove('selected'));
             btn.classList.add('selected');
@@ -11675,9 +11707,11 @@ async function fillDashboard() {
     
     roomStatusGrid.innerHTML = roomNumbers.map(num => {
       if (maintenanceRooms.includes(num)) {
+        const reason = maintenanceReasons[num] ? `<div class="room-status-reason" title="${escapeHTML(maintenanceReasons[num])}">${escapeHTML(maintenanceReasons[num])}</div>` : '';
         return `<div class="room-card maintenance" data-room="${num}">
           <div class="room-number">${num}</div>
           <div class="room-status-text">🔧 Maintenance</div>
+          ${reason}
         </div>`;
       }
       

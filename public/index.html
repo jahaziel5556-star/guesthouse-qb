@@ -93,7 +93,7 @@
   <!-- ═══════════════════════════════════════════════════════════════════════
        EXTERNAL STYLESHEET - Separated for maintainability
        ═══════════════════════════════════════════════════════════════════════ -->
-  <link rel="stylesheet" href="css/main.css?v=20260414b">
+  <link rel="stylesheet" href="css/main.css?v=20260415">
 </head>
 <body data-theme="light">
 
@@ -997,6 +997,19 @@
       </div>
       
       <p id="maintenanceStatusText"></p>
+      
+      <!-- Maintenance reason/issue field -->
+      <div id="maintenanceReasonSection" style="display:none; margin-bottom:14px;">
+        <label for="maintenanceReasonInput" style="font-size:0.85em; font-weight:600; color:var(--text-secondary); display:block; margin-bottom:4px;">Issue / Reason:</label>
+        <textarea id="maintenanceReasonInput" placeholder="e.g. Broken AC, plumbing leak, deep cleaning..." rows="2" style="width:100%; padding:8px 10px; border:1px solid var(--border-medium); border-radius:var(--radius-md); background:var(--bg-secondary); color:var(--text-primary); font-family:var(--font-family); font-size:0.9em; resize:vertical;"></textarea>
+      </div>
+      
+      <!-- Existing reason display -->
+      <div id="maintenanceReasonDisplay" style="display:none; margin-bottom:14px; padding:10px 12px; background:rgba(139,92,246,0.08); border-radius:var(--radius-md); border-left:3px solid #8b5cf6;">
+        <div style="font-size:0.75em; font-weight:700; color:#8b5cf6; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:2px;">Issue</div>
+        <div id="maintenanceReasonText" style="font-size:0.9em; color:var(--text-primary);"></div>
+      </div>
+      
       <div class="modal-footer">
         <button id="toggleMaintenanceBtn" class="btn btn-primary"></button>
         <button id="cancelMaintenanceBtn" class="btn btn-secondary">Cancel</button>
@@ -1708,6 +1721,6 @@
   </script>
 
   <!-- Main Application Script -->
-  <script type="module" src="main1.js?v=20260414b"></script>
+  <script type="module" src="main1.js?v=20260415"></script>
 </body>
 </html>

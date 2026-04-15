@@ -1001,6 +1001,16 @@
       color: #8b5cf6;
       font-weight: 700;
     }
+    .room-status-reason {
+      font-size: 0.58rem;
+      color: var(--text-muted);
+      margin-top: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 100%;
+      font-style: italic;
+    }
 
     .room-number {
       font-size: 1.1rem;
@@ -2066,6 +2076,24 @@
     [data-theme="dark"] .room-pick-btn.unavailable {
       background: rgba(239, 68, 68, 0.15);
       border-color: #ef4444;
+    }
+    .room-pick-btn.maintenance-room {
+      border-color: #8b5cf6;
+      background: rgba(139, 92, 246, 0.1);
+      color: var(--text-muted);
+      cursor: not-allowed;
+    }
+    .room-pick-btn.maintenance-room::after {
+      content: '🔧 Maintenance';
+      position: absolute;
+      bottom: 1px;
+      font-size: 0.5em;
+      font-weight: 600;
+      color: #8b5cf6;
+    }
+    [data-theme="dark"] .room-pick-btn.maintenance-room {
+      background: rgba(139, 92, 246, 0.15);
+      border-color: #8b5cf6;
     }
 
     /* Print modal - special sizing for forms */
