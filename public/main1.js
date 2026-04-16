@@ -9127,7 +9127,7 @@ function showReceiptDetailModal(payment, reservation) {
     const totalAdjustment = calcAdjustmentTotal(adjustments);
     totalDue = baseTotal + totalAdjustment;
     // Filter out voided payments
-    const resPayments = allPayments.filter(p => p.reservationId === reservation.id && !p.voided);
+    const resPayments = (window._allPaymentsCache || []).filter(p => p.reservationId === reservation.id && !p.voided);
     const actualPaid = resPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
     totalPaid = actualPaid + calcCreditTotal(reservation.balanceCredits);
     balance = Math.max(0, totalDue - totalPaid);
