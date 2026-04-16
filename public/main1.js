@@ -8286,7 +8286,6 @@ async function openExtendReservationModal(reservation) {
   // CONFIRM EXTENSION (Save Only)
   // ─────────────────────────────────────────────────────────────────────────
   const confirmExtendBtn = document.getElementById("confirmExtendReservationBtn");
-  const confirmExtendPrintBtn = document.getElementById("confirmExtendAndPrintBtn");
   
   // Spam prevention helper
   const disableExtensionButtons = () => {
@@ -8294,20 +8293,12 @@ async function openExtendReservationModal(reservation) {
       confirmExtendBtn.disabled = true;
       confirmExtendBtn.innerHTML = '<span class="material-icons" style="font-size:18px; vertical-align:middle;">hourglass_empty</span> Processing...';
     }
-    if (confirmExtendPrintBtn) {
-      confirmExtendPrintBtn.disabled = true;
-      confirmExtendPrintBtn.innerHTML = '<span class="material-icons" style="font-size:18px; vertical-align:middle;">hourglass_empty</span> Processing...';
-    }
   };
   
   const enableExtensionButtons = () => {
     if (confirmExtendBtn) {
       confirmExtendBtn.disabled = false;
       confirmExtendBtn.innerHTML = '<span class="material-icons" style="font-size:18px; vertical-align:middle;">save</span> Confirm Extension';
-    }
-    if (confirmExtendPrintBtn) {
-      confirmExtendPrintBtn.disabled = false;
-      confirmExtendPrintBtn.innerHTML = '<span class="material-icons" style="font-size:18px; vertical-align:middle;">print</span> Confirm & Print';
     }
   };
   
@@ -8385,82 +8376,6 @@ async function openExtendReservationModal(reservation) {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // CONFIRM & PRINT EXTENSION
-  // ─────────────────────────────────────────────────────────────────────────
-  if (confirmExtendPrintBtn) {
-    confirmExtendPrintBtn.onclick = async () => {
-      // Prevent spam clicks
-      if (confirmExtendPrintBtn.disabled) {
-        console.warn("Extension submission already in progress");
-        return;
-      }
-      
-      const extensionData = validateExtensionData();
-      if (!extensionData) return;
-
-      const { extensionNewDeparture, extensionRate, extensionAmount } = extensionData;
-
-      // Disable buttons during processing
-      disableExtensionButtons();
-
-      // Check for overlapping reservations
-      const hasOverlapConflict = await hasOverlap(
-        reservation.id, 
-        reservation.roomNumber, 
-        reservation.arrivalDate, 
-        extensionNewDeparture
-      );
-      
-      if (hasOverlapConflict) {
-        alert("Cannot extend reservation. Overlap with another booking for Room " + reservation.roomNumber + ".");
-        enableExtensionButtons();
-        return;
-      }
-
-      try {
-        const extensionReceipt = await saveExtensionPayment(reservation, {
-          newDeparture: extensionNewDeparture,
-          rate: extensionRate,
-          amount: extensionAmount,
-          method: extensionMethodSelect.value || "cash"
-        });
-
-        // Re-enable buttons before closing (for if modal opens again)
-        enableExtensionButtons();
-
-        ModalManager.close('extendReservationModal');
-
-        // Update reservation object with new departure/rate for form preview
-        reservation.departureDate = extensionNewDeparture;
-        if (extensionRate) reservation.rate = extensionRate;
-
-        // Show the full registration form (same as "Print Reservation Form")
-        const cust = customers.find(c => c.id === reservation.customerId);
-        if (cust) {
-          showFormPreview(reservation, cust, cust.idImageUrl || null);
-        } else if (extensionReceipt) {
-          printReceipt(extensionReceipt);
-        } else {
-          alert("Extension saved (no payment). Checkout date updated.");
-        }
-
-        // If opened from dashboard, clear flag
-        if (window._extendFromDashboard) {
-          window._extendFromDashboard = false;
-        } else if (window._lastReservationForPopup) {
-          // Return to edit reservation modal with updated data
-          window._lastReservationForPopup.departureDate = extensionNewDeparture;
-          if (extensionRate) window._lastReservationForPopup.rate = extensionRate;
-          showEditDeletePopup(window._lastReservationForPopup);
-          window._lastReservationForPopup = null;
-        }
-      } catch (err) {
-        console.error("Failed to save extension:", err);
-        alert("Failed to save extension. Please try again.");
-        enableExtensionButtons();
-      }
-    };
-  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -9442,14 +9357,11 @@ function showReceiptDetailModal(payment, reservation) {
     submitSearchReceiptBtn.innerHTML = 'Searching...';
 
     try {
-      // Always fetch fresh from Firestore to ensure latest data
-      let allPayments = window._allPaymentsCache || [];
-      if (allPayments.length === 0) {
-        const paymentsSnapshot = await getDocs(collection(db, "payments"));
-        allPayments = paymentsSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-      }
+      // Always fetch fresh from Firestore for reliable search
+      const paymentsSnapshot = await getDocs(collection(db, "payments"));
+      const allPayments = paymentsSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
       
-      // Flexible matching: strip leading zeros, non-numeric chars, and compare
+      // Flexible matching: strip non-numeric chars, leading zeros, and compare
       const cleanInput = receiptInput.replace(/[^0-9]/g, '');
       const searchNum = cleanInput.replace(/^0+/, '') || '0';
       const searchPadded = cleanInput.padStart(5, '0');
@@ -9459,11 +9371,12 @@ function showReceiptDetailModal(payment, reservation) {
         const rn = String(p.receiptNumber);
         const cleanRn = rn.replace(/[^0-9]/g, '');
         const pNum = cleanRn.replace(/^0+/, '') || '0';
+        // Match by: stripped number, padded number, exact input, or cleaned digits
         return pNum === searchNum || rn === searchPadded || rn === receiptInput || cleanRn === cleanInput;
       });
       
       if (!payment) {
-        errorDiv.textContent = `Receipt #${receiptInput} not found.`;
+        errorDiv.textContent = `Receipt #${receiptInput} not found. Searched ${allPayments.length} receipts.`;
         errorDiv.style.display = "block";
         return;
       }
