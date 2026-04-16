@@ -1993,8 +1993,8 @@
 
     .room-picker-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
-      gap: 8px;
+      grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
+      gap: 6px;
     }
     .room-picker-floor-label {
       grid-column: 1 / -1;
@@ -2015,12 +2015,12 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      padding: 10px 6px;
+      padding: 8px 4px;
       border: 2px solid var(--border-medium);
       border-radius: var(--radius-md);
       background: var(--bg-secondary);
       color: var(--text-primary);
-      font-size: 1em;
+      font-size: 0.95em;
       font-weight: 700;
       cursor: pointer;
       transition: all 0.15s ease;
@@ -2032,16 +2032,28 @@
       color: var(--text-muted);
       margin-top: 2px;
     }
-    .room-pick-btn:hover:not(.unavailable) {
+    .room-pick-btn:hover:not(.unavailable):not(.maintenance-room):not(.selected) {
       border-color: var(--accent-primary);
       background: var(--bg-tertiary);
       transform: translateY(-1px);
     }
     .room-pick-btn.selected {
-      border-color: #059669;
-      background: #10b981;
+      border-color: var(--accent-primary, #3b82f6);
+      background: var(--accent-primary, #3b82f6);
       color: #fff;
-      box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3), 0 4px 12px rgba(59, 130, 246, 0.4);
+      transform: scale(1.08);
+      z-index: 1;
+    }
+    .room-pick-btn.selected::before {
+      content: '\e5ca';
+      font-family: 'Material Icons';
+      position: absolute;
+      top: 2px;
+      right: 3px;
+      font-size: 14px;
+      color: #fff;
+      line-height: 1;
     }
     .room-pick-btn.selected .room-pick-type {
       color: rgba(255,255,255,0.8);
@@ -3002,9 +3014,9 @@
 
     /* Compact modal variant */
     .modal-content.modal-compact {
-      max-width: 580px;
+      max-width: 820px;
       padding: 20px 24px;
-      max-height: 90vh;
+      max-height: 92vh;
     }
 
     .modal-content.modal-compact h2 {
@@ -3018,6 +3030,34 @@
     .modal-content.modal-compact .modal-footer {
       margin-top: 12px;
       padding-top: 12px;
+    }
+
+    /* Two-column reservation layout */
+    .reservation-columns {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      align-items: start;
+    }
+    .reservation-columns fieldset {
+      margin: 0;
+    }
+    .reservation-columns .compact-group {
+      margin-bottom: 8px;
+    }
+    .reservation-columns .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px 12px;
+    }
+
+    @media (max-width: 768px) {
+      .reservation-columns {
+        grid-template-columns: 1fr;
+      }
+      .modal-content.modal-compact {
+        max-width: 580px;
+      }
     }
 
     @media (max-width: 600px) {

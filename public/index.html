@@ -93,7 +93,7 @@
   <!-- ═══════════════════════════════════════════════════════════════════════
        EXTERNAL STYLESHEET - Separated for maintainability
        ═══════════════════════════════════════════════════════════════════════ -->
-  <link rel="stylesheet" href="css/main.css?v=20260415">
+  <link rel="stylesheet" href="css/main.css?v=20260416b">
 </head>
 <body data-theme="light">
 
@@ -499,10 +499,11 @@
           </div>
         </div>
 
-        <!-- Guest Information -->
-        <fieldset>
-          <legend><span class="material-icons" aria-hidden="true">person</span> Guest Information</legend>
-          <div class="form-grid">
+        <!-- Two-column layout: Guest Info | Stay Details -->
+        <div class="reservation-columns">
+          <!-- LEFT COLUMN: Guest Information -->
+          <fieldset>
+            <legend><span class="material-icons" aria-hidden="true">person</span> Guest Information</legend>
             <div class="compact-group">
               <label for="name">Name <span class="sr-only">(required)</span></label>
               <input type="text" id="name" required minlength="2" maxlength="100" placeholder="Full name" autocomplete="off" aria-required="true" />
@@ -519,24 +520,28 @@
               <label for="customer-email">Email <span class="sr-only">(required)</span></label>
               <input type="email" id="customer-email" required maxlength="254" placeholder="email@example.com" autocomplete="off" aria-required="true" />
             </div>
-          </div>
-        </fieldset>
+          </fieldset>
 
-        <!-- Edit Stay Details -->
-        <fieldset>
-          <legend><span class="material-icons" aria-hidden="true">event</span> Edit Stay Details</legend>
-          <div class="form-grid">
-            <div class="compact-group">
-              <label for="arrival">Arrival Date <span class="sr-only">(required)</span></label>
-              <input type="date" id="arrival" required aria-required="true" />
-            </div>
-            <div class="compact-group">
-              <label for="departure">Departure Date <span class="sr-only">(required)</span></label>
-              <input type="date" id="departure" required aria-required="true" />
+          <!-- RIGHT COLUMN: Stay Details -->
+          <fieldset>
+            <legend><span class="material-icons" aria-hidden="true">event</span> Stay Details</legend>
+            <div class="form-grid">
+              <div class="compact-group">
+                <label for="arrival">Arrival Date <span class="sr-only">(required)</span></label>
+                <input type="date" id="arrival" required aria-required="true" />
+              </div>
+              <div class="compact-group">
+                <label for="departure">Departure Date <span class="sr-only">(required)</span></label>
+                <input type="date" id="departure" required aria-required="true" />
+              </div>
+              <div class="compact-group">
+                <label for="reservationRate">Rate per Night ($) <span class="sr-only">(required)</span></label>
+                <input type="number" id="reservationRate" min="0" step="0.01" required aria-required="true" />
+              </div>
             </div>
 
             <!-- Room Type Selector -->
-            <div class="compact-group full-width">
+            <div class="compact-group" style="margin-top:8px;">
               <label>Room Type <span class="sr-only">(required)</span></label>
               <div class="room-type-selector" id="roomTypeSelector">
                 <button type="button" class="room-type-btn" data-type="single" id="roomTypeSingleBtn">
@@ -551,7 +556,7 @@
             </div>
 
             <!-- Visual Room Picker (populated by JS) -->
-            <div class="compact-group full-width" id="roomPickerContainer" style="display:none;">
+            <div class="compact-group" id="roomPickerContainer" style="display:none; margin-top:6px;">
               <label>Select Room <span class="sr-only">(required)</span></label>
               <div class="room-picker-grid" id="roomPickerGrid">
                 <!-- Rooms injected by JS -->
@@ -561,16 +566,12 @@
             <!-- Hidden room input for form value -->
             <input type="hidden" id="room" required aria-required="true" />
 
-            <div class="compact-group">
-              <label for="reservationRate">Rate per Night ($) <span class="sr-only">(required)</span></label>
-              <input type="number" id="reservationRate" min="0" step="0.01" required aria-required="true" />
-            </div>
-            <div class="compact-group full-width">
+            <div class="compact-group" style="margin-top:6px;">
               <label for="reservationNote">Note</label>
               <textarea id="reservationNote" placeholder="Special requests, notes..." rows="2"></textarea>
             </div>
-          </div>
-        </fieldset>
+          </fieldset>
+        </div>
 
         <div class="modal-footer">
           <button type="button" id="clearReservationFormBtn" class="btn btn-danger">
@@ -1718,6 +1719,6 @@
   </script>
 
   <!-- Main Application Script -->
-  <script type="module" src="main1.js?v=20260415"></script>
+  <script type="module" src="main1.js?v=20260416b"></script>
 </body>
 </html>
