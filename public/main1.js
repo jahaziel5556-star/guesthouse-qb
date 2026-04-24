@@ -600,6 +600,17 @@ function roundCurrencyAmount(value) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
+function getReservationNights(arrivalDate, departureDate) {
+  const arrival = new Date(arrivalDate);
+  const departure = new Date(departureDate);
+
+  if (Number.isNaN(arrival.getTime()) || Number.isNaN(departure.getTime())) {
+    return 1;
+  }
+
+  return Math.max(1, Math.ceil((departure - arrival) / (1000 * 60 * 60 * 24)));
+}
+
 function computeReservationFinancials(reservation, payments = window._allPaymentsCache || []) {
   if (!reservation) {
     return {
@@ -618,7 +629,7 @@ function computeReservationFinancials(reservation, payments = window._allPayment
     };
   }
 
-  const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate);
+  const nights = getReservationNights(reservation.arrivalDate, reservation.departureDate);
   const rate = parseCurrencyAmount(reservation.rate);
   const baseTotal = roundCurrencyAmount(rate * nights);
   const totalAdjustment = roundCurrencyAmount(calcAdjustmentTotal(reservation.balanceAdjustments || []));
