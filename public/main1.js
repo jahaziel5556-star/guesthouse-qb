@@ -7297,19 +7297,37 @@ document.getElementById('generateBatchCloseBtn')?.addEventListener('click', asyn
   }
 
   // ═══════════════════════════════════════════════════════════════
-  // Get payment IDs already included in previous batch close sessions
-  // This prevents the same payment from appearing in multiple batch closes
+  // Get payment IDs already included in previous batch close sessions.
+  // SHIFT-CHANGE LOGIC:
+  //   - Only exclude payments that were batched BEFORE the current user's
+  //     shift started (i.e. in sessions by a different user, or in sessions
+  //     by the current user that pre-date the last other-user session).
+  //   - Within the same shift the report always shows the full shift totals
+  //     so re-printing doesn't make the report look empty.
   // ═══════════════════════════════════════════════════════════════
   const previouslyBatchedPaymentIds = new Set();
   try {
     const sessionsSnapshot = await getDocs(collection(db, APP_CONFIG.COLLECTIONS.BATCH_CLOSE_SESSIONS));
-    sessionsSnapshot.forEach(doc => {
-      const session = doc.data();
-      if (session.paymentIds && Array.isArray(session.paymentIds)) {
+    const allBatchSessions = sessionsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+    // Find the most recent session performed by a DIFFERENT user → shift-change point
+    const otherUserSessions = allBatchSessions
+      .filter(s => s.performedBy?.uid && s.performedBy.uid !== userId)
+      .sort((a, b) => new Date(b.performedAt) - new Date(a.performedAt));
+    const lastOtherSession = otherUserSessions[0];
+    const shiftStartTime = lastOtherSession ? new Date(lastOtherSession.performedAt) : null;
+
+    allBatchSessions.forEach(session => {
+      const isOtherUser = session.performedBy?.uid !== userId;
+      const sessionTime = session.performedAt ? new Date(session.performedAt) : null;
+      // Exclude if: performed by someone else, OR by current user but before shift started
+      const shouldExclude = isOtherUser || (shiftStartTime && sessionTime && sessionTime <= shiftStartTime);
+      if (shouldExclude && session.paymentIds && Array.isArray(session.paymentIds)) {
         session.paymentIds.forEach(id => previouslyBatchedPaymentIds.add(id));
       }
     });
-    Logger.debug(`Found ${previouslyBatchedPaymentIds.size} payments in previous batch sessions`);
+
+    Logger.debug(`Shift start: ${shiftStartTime ? shiftStartTime.toISOString() : 'beginning of time'} | Excluded ${previouslyBatchedPaymentIds.size} payments from previous shifts`);
   } catch (err) {
     console.warn('Could not load previous batch sessions:', err);
   }
@@ -7317,8 +7335,8 @@ document.getElementById('generateBatchCloseBtn')?.addEventListener('click', asyn
   // ═══════════════════════════════════════════════════════════════
   // BATCH CLOSE LOGIC:
   // - Shows ALL payments made in the period (regardless of who recorded them)
-  // - Excludes payments already included in a previous batch close session
-  // - Anyone (staff, manager, admin) sees the same payments
+  // - Excludes payments already included in a previous shift's batch close
+  // - Within the same shift, re-printing always shows the full shift totals
   // ═══════════════════════════════════════════════════════════════
 
   // Find payments made in this period (excluding already batched ones)
