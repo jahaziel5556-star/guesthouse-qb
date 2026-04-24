@@ -96,6 +96,84 @@ function calculateSpecialNights(arrival, departure) {
   return Math.max(1, Math.ceil((b - a) / 86400000));
 }
 
+function parseCurrencyAmount(value) {
+  const amount = Number.parseFloat(value);
+  return Number.isFinite(amount) ? amount : 0;
+}
+
+function roundCurrencyAmount(value) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function calcAdjustmentTotal(adjustments) {
+  if (!adjustments || !adjustments.length) return 0;
+  return adjustments.reduce((sum, adjustment) => {
+    if (adjustment.type === 'daily_charge') return sum;
+    return sum + (adjustment.type === 'discount' ? -parseCurrencyAmount(adjustment.amount) : parseCurrencyAmount(adjustment.amount));
+  }, 0);
+}
+
+function calcCreditTotal(credits) {
+  if (!credits || !credits.length) return 0;
+  return credits.reduce((sum, credit) => sum + parseCurrencyAmount(credit.amount), 0);
+}
+
+function computeReservationFinancials(reservation, payments = []) {
+  if (!reservation) {
+    return {
+      nights: 1,
+      rate: 0,
+      baseTotal: 0,
+      totalAdjustment: 0,
+      totalCredits: 0,
+      totalDue: 0,
+      actualPaid: 0,
+      totalPaid: 0,
+      balance: 0,
+      outstandingBalance: 0,
+      paymentStatus: 'unpaid',
+      activePayments: []
+    };
+  }
+
+  const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate);
+  const rate = parseCurrencyAmount(reservation.rate);
+  const baseTotal = roundCurrencyAmount(rate * nights);
+  const totalAdjustment = roundCurrencyAmount(calcAdjustmentTotal(reservation.balanceAdjustments || []));
+  const totalCredits = roundCurrencyAmount(calcCreditTotal(reservation.balanceCredits || []));
+  const activePayments = (payments || []).filter(payment => !payment.voided);
+  const actualPaid = roundCurrencyAmount(
+    activePayments.reduce((sum, payment) => sum + parseCurrencyAmount(payment.amount), 0)
+  );
+  const totalDue = roundCurrencyAmount(baseTotal + totalAdjustment);
+  const totalPaid = roundCurrencyAmount(actualPaid + totalCredits);
+  const balance = roundCurrencyAmount(totalDue - totalPaid);
+
+  let paymentStatus = 'unpaid';
+  if (totalDue <= 0) {
+    paymentStatus = totalPaid > 0 ? 'fully_paid' : 'unpaid';
+  } else if (totalPaid + 0.009 >= totalDue) {
+    paymentStatus = 'fully_paid';
+  } else if (totalPaid > 0) {
+    paymentStatus = 'partially_paid';
+  }
+
+  return {
+    nights,
+    rate,
+    baseTotal,
+    totalAdjustment,
+    totalCredits,
+    totalDue,
+    actualPaid,
+    totalPaid,
+    balance,
+    outstandingBalance: Math.max(0, balance),
+    paymentStatus,
+    activePayments
+  };
+}
+
 /** Build an array of YYYY-MM-DD strings from start to end inclusive. */
 function getDateRange(start, end) {
   const dates = [];
@@ -117,6 +195,18 @@ function escapeHTML(str) {
 
 // ─── Status utilities ─────────────────────────────────────────────────────────
 const StatusUtils = {
+  formatPaymentStatus(status) {
+    const statusMap = {
+      fully_paid: { text: 'Fully Paid', color: '#10b981', class: 'status-paid' },
+      paid: { text: 'Fully Paid', color: '#10b981', class: 'status-paid' },
+      partially_paid: { text: 'Partial', color: '#f59e0b', class: 'status-partial' },
+      not_paid: { text: 'Unpaid', color: '#ef4444', class: 'status-unpaid' },
+      unpaid: { text: 'Unpaid', color: '#ef4444', class: 'status-unpaid' },
+      reserved: { text: 'Reserved', color: '#8b5cf6', class: 'status-reserved' }
+    };
+    return statusMap[status] || { text: status || 'Unknown', color: '#6b7280', class: 'status-unknown' };
+  },
+
   formatCheckStatus(reservation) {
     const today = getTodayISO();
     if (reservation.checkedOut) {
@@ -232,6 +322,7 @@ export {
   formatDateDMY,
   getTodayISO,
   calculateSpecialNights,
+  computeReservationFinancials,
   getDateRange,
   escapeHTML,
   StatusUtils,

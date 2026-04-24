@@ -400,9 +400,25 @@ const CUSTOMER_MAP_PATH = path.join(__dirname, "customers.json");
 const qbCache = {
   itemRef: null,           // Cached item reference
   itemRefExpiry: 0,        // Cache expiry timestamp
+  paymentMethods: null,    // Cached QuickBooks payment methods
+  paymentMethodExpiry: 0,  // Cache expiry timestamp
   taxCodeRefs: new Map(),  // Cached tax code references by key
   taxCodeExpiry: 0,        // Cache expiry timestamp
   CACHE_TTL: 3600000       // 1 hour cache TTL
+};
+
+const PAYMENT_METHOD_ALIASES = {
+  cash: ["cash", "cash payment", "cash on hand"],
+  card: ["card", "credit card", "debit card", "credit", "debit", "visa", "mastercard"],
+  cheque: ["cheque", "check", "cheque payment", "check payment"],
+  mobile: ["mobile", "mobile banking", "bank transfer", "transfer", "online transfer", "mobile transfer"]
+};
+
+const PAYMENT_METHOD_LABELS = {
+  cash: "Cash",
+  card: "Card",
+  cheque: "Cheque",
+  mobile: "Mobile Banking"
 };
 
 /** Default item name for sales receipts */
@@ -537,6 +553,82 @@ async function qboQuery(tokens, q) {
     headers: { Authorization: `Bearer ${tokens.access_token}`, Accept: "application/json" },
   });
   return resp.data;
+}
+
+function normalizeLookupValue(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function formatPaymentMethodLabel(method) {
+  const normalized = normalizeLookupValue(method);
+  const matchedKey = Object.entries(PAYMENT_METHOD_ALIASES)
+    .find(([, aliases]) => aliases.includes(normalized))?.[0];
+
+  if (matchedKey && PAYMENT_METHOD_LABELS[matchedKey]) {
+    return PAYMENT_METHOD_LABELS[matchedKey];
+  }
+
+  if (!normalized) return "N/A";
+  return normalized.replace(/\b\w/g, char => char.toUpperCase());
+}
+
+function getPaymentMethodCandidates(method) {
+  const normalized = normalizeLookupValue(method);
+  if (!normalized) return [];
+
+  const matchedKey = Object.entries(PAYMENT_METHOD_ALIASES)
+    .find(([, aliases]) => aliases.includes(normalized))?.[0];
+
+  if (!matchedKey) return [normalized];
+
+  return [
+    normalizeLookupValue(PAYMENT_METHOD_LABELS[matchedKey]),
+    ...PAYMENT_METHOD_ALIASES[matchedKey]
+  ];
+}
+
+async function getActivePaymentMethods(tokens) {
+  if (qbCache.paymentMethods && Date.now() < qbCache.paymentMethodExpiry) {
+    return qbCache.paymentMethods;
+  }
+
+  const data = await qboQuery(tokens, "select * from PaymentMethod maxresults 100");
+  qbCache.paymentMethods = (data.QueryResponse.PaymentMethod || []).filter(method => method.Active !== false);
+  qbCache.paymentMethodExpiry = Date.now() + qbCache.CACHE_TTL;
+  return qbCache.paymentMethods;
+}
+
+async function resolvePaymentMethodRef(tokens, method) {
+  const candidates = getPaymentMethodCandidates(method);
+  if (!candidates.length) return null;
+
+  try {
+    const paymentMethods = await getActivePaymentMethods(tokens);
+    const match = paymentMethods.find(paymentMethod => {
+      const normalizedName = normalizeLookupValue(paymentMethod.Name || paymentMethod.name);
+      return candidates.some(candidate => (
+        candidate === normalizedName ||
+        normalizedName.includes(candidate) ||
+        candidate.includes(normalizedName)
+      ));
+    });
+
+    if (!match) {
+      log(`[WARN] No QuickBooks PaymentMethod matched for '${method}'`);
+      return null;
+    }
+
+    return {
+      value: match.Id,
+      name: match.Name || null
+    };
+  } catch (error) {
+    log(`[WARN] QuickBooks PaymentMethod lookup failed for '${method}':`, error.response?.data || error.message || error);
+    return null;
+  }
 }
 
 /**
@@ -969,6 +1061,8 @@ app.post("/payment-to-quickbooks", async (req, res) => {
     const itemRef = await ensureItemRef(tokens);
     const taxCodeRef = await resolveTaxCodeRef(tokens, { taxCode, taxAgency });
     const taxCodeFull = taxCodeRef._full;
+    const paymentMethodRef = await resolvePaymentMethodRef(tokens, method);
+    const paymentMethodLabel = formatPaymentMethodLabel(method);
 
     // If QBO returns 0% combined rate for your TaxCode, fall back to a configured percent
     const combinedRateRaw = extractCombinedRate(taxCodeFull); // could be 0 if code has no TaxRateList
@@ -1055,7 +1149,7 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       `Room: ${room || "-"}`,
       `Check-in: ${checkin || "-"}`,
       `Check-out: ${checkout || "-"}`,
-      `Payment: ${method ? method.charAt(0).toUpperCase() + method.slice(1) : "N/A"}`,
+      `Payment: ${paymentMethodLabel}`,
       `Includes VAT @ ${combinedRate.toFixed(2)}% on EC$${netAmount.toFixed(2)} = EC$${taxAmount.toFixed(2)}`
     ].join(" | ");
 
@@ -1071,6 +1165,7 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       PrivateNote: notes || "",
       GlobalTaxCalculation: "TaxInclusive",
       DepositToAccountRef: { value: DEPOSIT_ACCOUNT_ID },  // 003-Undeposited Funds Clearing
+      ...(paymentMethodRef ? { PaymentMethodRef: { value: paymentMethodRef.value } } : {}),
       TxnTaxDetail: {
         TxnTaxCodeRef: { value: taxCodeRef.value },
         TotalTax: taxAmount,
@@ -1112,6 +1207,8 @@ app.post("/payment-to-quickbooks", async (req, res) => {
           duplicate: true,
           receiptId: 'existing',
           docNumber: payload.DocNumber,
+          paymentMethod: paymentMethodLabel,
+          paymentMethodRefId: paymentMethodRef?.value || null,
           grossEntered: grossAmount.toFixed(2),
           netCalculated: netAmount.toFixed(2),
           taxCalculated: taxAmount.toFixed(2),
@@ -1136,6 +1233,8 @@ app.post("/payment-to-quickbooks", async (req, res) => {
       success: true,
       receiptId,
       docNumber: finalDocNumber,
+      paymentMethod: paymentMethodLabel,
+      paymentMethodRefId: paymentMethodRef?.value || null,
       grossEntered: grossAmount.toFixed(2),
       netCalculated: netAmount.toFixed(2),
       taxCalculated: taxAmount.toFixed(2),

@@ -14,7 +14,7 @@ import {
   applyTheme,
   toggleTheme,
   formatDateDMY,
-  calculateSpecialNights,
+  computeReservationFinancials,
   escapeHTML,
   StatusUtils,
   loadCustomers,
@@ -203,15 +203,17 @@ async function loadReport() {
       const resAllTimePays = allTimePayByRes.get(reservation.id) || [];
       const resPeriodPays  = periodPayByRes.get(reservation.id)  || [];
 
-      const nights    = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate);
-      const rate      = parseFloat(reservation.rate) || 0;
-      const baseTotal = rate * nights;
-      const adjs      = reservation.balanceAdjustments || [];
-      const adjTotal  = adjs.reduce((s, a) => s + (a.type === 'discount' ? -a.amount : a.amount), 0);
-      const totalDue    = baseTotal + adjTotal;
-      const allTimePaid = resAllTimePays.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
-      const periodPaid  = resPeriodPays.reduce( (s, p) => s + (parseFloat(p.amount) || 0), 0);
-      const balance     = Math.max(0, totalDue - allTimePaid);
+      const financials = computeReservationFinancials(reservation, resAllTimePays);
+      const {
+        nights,
+        rate,
+        totalDue,
+        totalPaid: allTimePaid,
+        outstandingBalance: balance,
+        paymentStatus,
+        totalCredits
+      } = financials;
+      const periodPaid = resPeriodPays.reduce((sum, payment) => sum + (parseFloat(payment.amount) || 0), 0);
 
       // Filter
       let include = false;
@@ -246,10 +248,9 @@ async function loadReport() {
       }
 
       // Status
-      let displayStatus = 'Unpaid';
-      let statusColor   = '#ef4444';
-      if      (allTimePaid >= totalDue && totalDue > 0) { displayStatus = 'Fully Paid'; statusColor = '#10b981'; }
-      else if (allTimePaid > 0)                          { displayStatus = 'Partial';    statusColor = '#f59e0b'; }
+      const paymentStatusInfo = StatusUtils.formatPaymentStatus(paymentStatus);
+      const displayStatus = paymentStatusInfo.text;
+      const statusColor = paymentStatusInfo.color;
 
       const checkInfo = StatusUtils.formatCheckStatus(reservation);
       const numGuests = reservation.numGuests || reservation.guests || reservation.numberOfGuests || 1;
@@ -275,8 +276,8 @@ async function loadReport() {
         <td style="text-align:center;">${nights}</td>
         <td style="text-align:center;">${numGuests}</td>
         <td style="text-align:right;">$${rate.toFixed(2)}</td>
-        <td style="text-align:right;">$${totalDue.toFixed(2)}</td>
-        <td style="text-align:right;color:var(--text-secondary);">$${allTimePaid.toFixed(2)}</td>
+        <td style="text-align:right;" title="Base charge plus balance adjustments">$${totalDue.toFixed(2)}</td>
+        <td style="text-align:right;color:var(--text-secondary);" title="Valid receipts plus balance credits${totalCredits > 0 ? ` (includes $${totalCredits.toFixed(2)} in credits)` : ''}">$${allTimePaid.toFixed(2)}</td>
         <td style="text-align:right;font-weight:600;color:${periodPaid > 0 ? '#10b981' : 'var(--text-muted)'};">${isDateRange ? '$'+periodPaid.toFixed(2) : '\u2014'}</td>
         <td style="text-align:right;color:${balance > 0 ? '#ef4444' : '#10b981'};font-weight:600;">$${balance.toFixed(2)}</td>
         <td style="white-space:nowrap;">
@@ -356,7 +357,7 @@ function renderFooter(range, startStr, endStr, isDateRange, rowCount, sumTotalDu
         <div style="padding:12px 14px;background:var(--bg-secondary);border:1px solid var(--border-light);border-radius:8px;border-top:3px solid #6b7280;">
           <div style="font-size:10px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;">Paid (All-time)</div>
           <div style="font-size:28px;font-weight:700;color:#10b981;margin-top:2px;">$${sumAllTimePaid.toFixed(2)}</div>
-          <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">All payments ever on shown reservations</div>
+          <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">Valid receipts plus balance credits on shown reservations</div>
         </div>
 
         <div style="padding:12px 14px;background:var(--bg-secondary);border:1px solid var(--border-light);border-radius:8px;border-top:3px solid #ef4444;">
