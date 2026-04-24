@@ -2253,16 +2253,29 @@ async function retryFailedQBSyncsFromFirestore() {
             qbPaymentData: null,
             qbSyncNote: 'Already existed in QuickBooks'
           });
-        } else {
-          Logger.warn(`Payment ${payment.receiptNumber} QB sync retry failed:`, errMsg);
-        
-          // Increment attempt count
-          await updateDoc(doc(db, 'payments', payment.id), {
-            qbSyncAttempts: (payment.qbSyncAttempts || 0) + 1,
-            qbSyncError: errMsg || 'Unknown error',
-            qbLastAttempt: new Date().toISOString()
-          });
-        }
+          } else if (/HTTP 401|Authentication expired|authRequired|not authenticated/i.test(errMsg)) {
+            // QB re-authorization required — stop all retries for this session,
+            // do NOT burn attempt counts (server cold-start / token expiry is transient)
+            Logger.warn('QuickBooks requires re-authorization. Pausing retries.');
+            showToast('QuickBooks needs re-authorization. Please re-connect from the admin panel.', 'warning');
+            break;
+          } else if (/HTTP 5\d\d|Network fetch failed/i.test(errMsg)) {
+            // Transient server error (Render cold-start, network blip) — record the error
+            // but do NOT increment attempt count so we don't exhaust the retry budget
+            Logger.warn(`Payment ${payment.receiptNumber} QB sync failed (transient server error — not counting):`, errMsg);
+            await updateDoc(doc(db, 'payments', payment.id), {
+              qbSyncError: errMsg || 'Server error',
+              qbLastAttempt: new Date().toISOString()
+            });
+          } else {
+            Logger.warn(`Payment ${payment.receiptNumber} QB sync retry failed:`, errMsg);
+            // Increment attempt count only for definitive failures (bad data, QB rejection)
+            await updateDoc(doc(db, 'payments', payment.id), {
+              qbSyncAttempts: (payment.qbSyncAttempts || 0) + 1,
+              qbSyncError: errMsg || 'Unknown error',
+              qbLastAttempt: new Date().toISOString()
+            });
+          }
       }
     }
   } catch (err) {

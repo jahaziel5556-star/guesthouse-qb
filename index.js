@@ -1254,12 +1254,19 @@ app.post("/payment-to-quickbooks", async (req, res) => {
     }
     
     // Determine appropriate user-facing error message
-    let userMessage = "Failed to process payment. Please try again.";
     const errStr = JSON.stringify(errorData || err.message || '');
-    
-    if (errStr.includes('invalid_grant') || errStr.includes('Token')) {
-      userMessage = "Authentication expired. Please re-authorize QuickBooks.";
-    } else if (errStr.includes('Duplicate') || errStr.includes('DocNumber')) {
+
+    // Auth errors → 401 so the frontend knows not to burn retry attempts
+    if (/invalid_grant|Token|not authenticated|not auth/i.test(errStr)) {
+      return res.status(401).json({
+        error: "Authentication expired. Please re-authorize QuickBooks.",
+        authRequired: true,
+        debug: null
+      });
+    }
+
+    let userMessage = "Failed to process payment. Please try again.";
+    if (errStr.includes('Duplicate') || errStr.includes('DocNumber')) {
       userMessage = "Receipt number already exists. A new one will be generated.";
     } else if (/already exists|name supplied/i.test(errStr)) {
       userMessage = "Customer name conflict in QuickBooks. Please try again.";
@@ -1268,10 +1275,14 @@ app.post("/payment-to-quickbooks", async (req, res) => {
     } else if (errStr.includes('Invalid Reference Id') || errStr.includes('ItemRef') || errStr.includes('DepositToAccountRef')) {
       userMessage = "Invalid item or account reference. Check ITEM_REF_ID and DEPOSIT_ACCOUNT_ID configuration.";
     }
-    
+
+    const debugDetail = errorData?.Fault?.Error?.[0]?.Detail
+      || errorData?.Fault?.Error?.[0]?.Message
+      || (errorData ? JSON.stringify(errorData).slice(0, 300) : null);
+
     res.status(500).json({
       error: userMessage,
-      debug: errorData?.Fault?.Error?.[0]?.Detail || null
+      debug: debugDetail || null
     });
   }
 });
