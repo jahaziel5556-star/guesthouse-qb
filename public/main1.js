@@ -878,11 +878,23 @@ async function initializeApp() {
   // Expose logout function
   window.logout = logout;
 
+  function isHandledAuthRedirect(error) {
+    return [
+      'Auth timeout',
+      'Not authenticated',
+      'Anonymous user not allowed',
+      'Not an employee',
+      'Account deactivated'
+    ].includes(error?.message);
+  }
+
   try {
     await verifyAuthentication();
     setupTokenRefresh();
   } catch (authErr) {
-    console.error("Authentication failed:", authErr);
+    if (!isHandledAuthRedirect(authErr)) {
+      console.error("Authentication failed:", authErr);
+    }
     return;
   }
 
