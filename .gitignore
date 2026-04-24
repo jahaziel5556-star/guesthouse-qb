@@ -13,6 +13,9 @@ Thumbs.db
 .vscode/
 .idea/
 
+# Firebase cache
+.firebase/
+
 # Logs
 *.log
 npm-debug.log*

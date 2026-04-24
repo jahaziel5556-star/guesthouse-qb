@@ -386,7 +386,7 @@ window.ButtonManager = ButtonManager;
 const StatusUtils = {
   /**
    * Format payment status for display
-   * @param {string} status - Internal status (fully_paid, partially_paid, not_paid, etc.)
+    * @param {string} status - Internal status (fully_paid, partially_paid, unpaid, legacy not_paid, etc.)
    * @returns {object} { text: string, color: string, class: string }
    */
   formatPaymentStatus(status) {
@@ -591,6 +591,71 @@ function calcCreditTotal(credits) {
   return credits.reduce((sum, c) => sum + parseFloat(c.amount || 0), 0);
 }
 
+function parseCurrencyAmount(value) {
+  const amount = Number.parseFloat(value);
+  return Number.isFinite(amount) ? amount : 0;
+}
+
+function roundCurrencyAmount(value) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function computeReservationFinancials(reservation, payments = window._allPaymentsCache || []) {
+  if (!reservation) {
+    return {
+      nights: 1,
+      rate: 0,
+      baseTotal: 0,
+      totalAdjustment: 0,
+      totalCredits: 0,
+      totalDue: 0,
+      actualPaid: 0,
+      totalPaid: 0,
+      balance: 0,
+      outstandingBalance: 0,
+      paymentStatus: 'unpaid',
+      activePayments: []
+    };
+  }
+
+  const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate);
+  const rate = parseCurrencyAmount(reservation.rate);
+  const baseTotal = roundCurrencyAmount(rate * nights);
+  const totalAdjustment = roundCurrencyAmount(calcAdjustmentTotal(reservation.balanceAdjustments || []));
+  const totalCredits = roundCurrencyAmount(calcCreditTotal(reservation.balanceCredits || []));
+  const activePayments = (payments || []).filter(payment => !payment.voided);
+  const actualPaid = roundCurrencyAmount(
+    activePayments.reduce((sum, payment) => sum + parseCurrencyAmount(payment.amount), 0)
+  );
+  const totalDue = roundCurrencyAmount(baseTotal + totalAdjustment);
+  const totalPaid = roundCurrencyAmount(actualPaid + totalCredits);
+  const balance = roundCurrencyAmount(totalDue - totalPaid);
+
+  let paymentStatus = 'unpaid';
+  if (totalDue <= 0) {
+    paymentStatus = totalPaid > 0 ? 'fully_paid' : 'unpaid';
+  } else if (totalPaid + 0.009 >= totalDue) {
+    paymentStatus = 'fully_paid';
+  } else if (totalPaid > 0) {
+    paymentStatus = 'partially_paid';
+  }
+
+  return {
+    nights,
+    rate,
+    baseTotal,
+    totalAdjustment,
+    totalCredits,
+    totalDue,
+    actualPaid,
+    totalPaid,
+    balance,
+    outstandingBalance: Math.max(0, balance),
+    paymentStatus,
+    activePayments
+  };
+}
+
 /**
  * computeLivePaymentStatus — single source of truth for payment status.
  *
@@ -604,20 +669,9 @@ function calcCreditTotal(credits) {
 function computeLivePaymentStatus(reservation) {
   if (!reservation) return 'unpaid';
   try {
-    const start = new Date(reservation.arrivalDate);
-    const end   = new Date(reservation.departureDate);
-    const nights = Math.max(1, Math.ceil((end - start) / (1000 * 60 * 60 * 24)));
-    const rate     = parseFloat(reservation.rate) || 0;
-    const totalDue = rate * nights + calcAdjustmentTotal(reservation.balanceAdjustments);
-    const actualPaid = (window._allPaymentsCache || [])
-      .filter(p => p.reservationId === reservation.id && !p.voided)
-      .reduce((s, p) => s + parseFloat(p.amount || 0), 0);
-    const creditTotal = calcCreditTotal(reservation.balanceCredits);
-    const totalPaid = actualPaid + creditTotal;
-    if (totalDue <= 0) return totalPaid > 0 ? 'fully_paid' : 'unpaid';
-    if (totalPaid >= totalDue) return 'fully_paid';
-    if (totalPaid > 0) return 'partially_paid';
-    return 'unpaid';
+    const reservationPayments = (window._allPaymentsCache || [])
+      .filter(payment => payment.reservationId === reservation.id);
+    return computeReservationFinancials(reservation, reservationPayments).paymentStatus;
   } catch (err) {
     console.warn('computeLivePaymentStatus error for reservation', reservation.id, err);
     return reservation.paymentStatus || 'unpaid';
@@ -2558,37 +2612,27 @@ async function openManagePaymentModal(reservation) {
   const allPayments = (window._allPaymentsCache || [])
     .filter(p => p.reservationId === reservation.id)
     .sort(comparePaymentsByTime);
-  
-  // Active payments exclude voided ones (for calculations)
-  const activePayments = allPayments.filter(p => !p.voided);
 
-  // Use the rate entered at reservation (reservationRate)
-  const rate = parseFloat(reservation.rate || 0);
-  const baseTotal = rate * nights;
-  
-  // Calculate adjustments (discounts and additional charges stored on reservation)
   const adjustments = reservation.balanceAdjustments || [];
-  const totalAdjustment = calcAdjustmentTotal(adjustments);
-  
-  // Calculate credits (stored on reservation, count toward paid without using receipts)
   const balanceCredits = reservation.balanceCredits || [];
-  const totalCredits = calcCreditTotal(balanceCredits);
-  
-  const total = baseTotal + totalAdjustment;
-  const actualPaid = activePayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-  const totalPaid = actualPaid + totalCredits;
-  const balance = (total - totalPaid);
+  const financials = computeReservationFinancials(reservation, allPayments);
+  const {
+    rate,
+    totalAdjustment,
+    totalCredits,
+    totalDue: total,
+    totalPaid,
+    outstandingBalance,
+    paymentStatus,
+    activePayments
+  } = financials;
 
   // ── AUTO-HEAL paymentStatus ─────────────────────────────────────────────
   // The stored paymentStatus may be stale (e.g. rate was changed during an
   // extension before a previous bug-fix, leaving the field out of sync).
   // Recalculate the correct status here and silently fix it if it differs.
   {
-    const correctStatus = totalPaid >= total
-      ? 'fully_paid'
-      : totalPaid > 0
-        ? 'partially_paid'
-        : 'unpaid';
+    const correctStatus = paymentStatus;
     if (reservation.paymentStatus !== correctStatus) {
       console.log(`🔧 Auto-correcting paymentStatus for reservation ${reservation.id}: "${reservation.paymentStatus}" → "${correctStatus}"`);
       updateDoc(doc(db, "reservations", reservation.id), { paymentStatus: correctStatus })
@@ -2599,16 +2643,20 @@ async function openManagePaymentModal(reservation) {
 
   // Helper: recalculate balance from fresh cache (avoids stale closure values)
   const getFreshBalance = () => {
-    const freshPayments = (window._allPaymentsCache || [])
-      .filter(p => p.reservationId === reservation.id && !p.voided);
-    const freshActualPaid = freshPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-    const freshTotalPaid = freshActualPaid + totalCredits;
-    return { totalCost: total, totalPaid: freshTotalPaid, balance: Math.max(0, total - freshTotalPaid) };
+    const freshFinancials = computeReservationFinancials(
+      reservation,
+      (window._allPaymentsCache || []).filter(payment => payment.reservationId === reservation.id)
+    );
+    return {
+      totalCost: freshFinancials.totalDue,
+      totalPaid: freshFinancials.totalPaid,
+      balance: freshFinancials.outstandingBalance
+    };
   };
 
   // Fill summary
   document.getElementById("totalPaid").textContent = totalPaid.toFixed(2);
-  document.getElementById("balanceRemaining").textContent = Math.max(0, balance).toFixed(2);
+  document.getElementById("balanceRemaining").textContent = outstandingBalance.toFixed(2);
   if (document.getElementById("totalDue")) {
     document.getElementById("totalDue").textContent = total.toFixed(2);
   }
@@ -2623,7 +2671,7 @@ async function openManagePaymentModal(reservation) {
   const overdueTagEl = document.getElementById("overdueTag");
   if (overdueTagEl) {
     const todayStr = getTodayLocal();
-    const isOverdue = reservation.departureDate < todayStr && balance > 0;
+    const isOverdue = reservation.departureDate < todayStr && outstandingBalance > 0;
     overdueTagEl.style.display = isOverdue ? "inline" : "none";
     if (isOverdue) {
       const daysOverdue = Math.ceil((new Date(todayStr) - new Date(reservation.departureDate)) / (1000 * 60 * 60 * 24));
@@ -2632,7 +2680,7 @@ async function openManagePaymentModal(reservation) {
   }
 
   // Show credits subtotal (from reservation.balanceCredits, NOT from payments)
-  const creditsTotal = balanceCredits.reduce((sum, c) => sum + parseFloat(c.amount || 0), 0);
+  const creditsTotal = totalCredits;
   const creditsSubtotalEl = document.getElementById("creditsSubtotal");
   const creditsAmountEl = document.getElementById("creditsAmount");
   if (creditsSubtotalEl && creditsAmountEl) {
@@ -2909,7 +2957,7 @@ if (summaryBtn) {
           <option value="cash" ${currentMethod === "cash" ? "selected" : ""}>Cash</option>
           <option value="card" ${currentMethod === "card" ? "selected" : ""}>Card</option>
           <option value="cheque" ${currentMethod === "cheque" ? "selected" : ""}>Cheque</option>
-          <option value="mobile" ${currentMethod === "mobile" ? "selected" : ""}>Mobile</option>
+          <option value="mobile" ${currentMethod === "mobile" ? "selected" : ""}>Mobile Banking</option>
         </select>
         <label style="display:block;margin-bottom:4px;color:#333;font-weight:500;">Note:</label>
         <textarea id="editPaymentNote" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:6px;background:#fff;color:#333;font-size:1em;min-height:60px;">${paymentData.note || ""}</textarea>
@@ -2958,27 +3006,11 @@ if (summaryBtn) {
           }
 
           try {
-            // Calculate new total paid
             const paymentsSnapshot = await getDocs(collection(db, "payments"));
             const allResPayments = paymentsSnapshot.docs
               .map(d => ({ id: d.id, ...d.data() }))
               .filter(p => p.reservationId === reservation.id && !p.voided);
-            const totalPaid = allResPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-            
-            // Calculate total due
-            const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate);
-            const baseTotal = (parseFloat(reservation.rate) || 0) * nights;
-            const adjustments = reservation.balanceAdjustments || [];
-            const totalAdjustment = calcAdjustmentTotal(adjustments);
-            const totalDue = baseTotal + totalAdjustment;
-            
-            // Determine new payment status
-            let newStatus = "not_paid";
-            if (totalPaid >= totalDue) {
-              newStatus = "fully_paid";
-            } else if (totalPaid > 0) {
-              newStatus = "partially_paid";
-            }
+            const newStatus = computeReservationFinancials(reservation, allResPayments).paymentStatus;
             
             // Update reservation
             await updateDoc(doc(db, "reservations", reservation.id), {
@@ -3045,19 +3077,7 @@ if (summaryBtn) {
 
         // Recalculate payment status (exclude voided payments)
         const remainingActivePayments = activePayments.filter(p => p.id !== paymentId);
-        const totalPaidAfterVoid = remainingActivePayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-        const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate);
-        const baseTotal = (parseFloat(reservation.rate) || 0) * nights;
-        // Include balance adjustments
-        const adjustments = reservation.balanceAdjustments || [];
-        const totalAdjustment = calcAdjustmentTotal(adjustments);
-        const totalDue = baseTotal + totalAdjustment;
-        let newStatus = "not_paid";
-        if (totalPaidAfterVoid >= totalDue) {
-          newStatus = "fully_paid";
-        } else if (totalPaidAfterVoid > 0) {
-          newStatus = "partially_paid";
-        }
+        const newStatus = computeReservationFinancials(reservation, remainingActivePayments).paymentStatus;
 
         const reservationRef = doc(db, "reservations", reservation.id);
         await updateDoc(reservationRef, {
@@ -3131,21 +3151,7 @@ if (summaryBtn) {
         const allPaymentsForRes = allPaymentsSnapshot.docs
           .map(d => ({ id: d.id, ...d.data() }))
           .filter(p => p.reservationId === reservation.id && !p.voided);
-        
-        const totalPaidAfterUnvoid = allPaymentsForRes.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-        const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate);
-        const baseTotal = (parseFloat(reservation.rate) || 0) * nights;
-        // Include balance adjustments
-        const adjustments = reservation.balanceAdjustments || [];
-        const totalAdjustment = calcAdjustmentTotal(adjustments);
-        const totalDue = baseTotal + totalAdjustment;
-        
-        let newStatus = "not_paid";
-        if (totalPaidAfterUnvoid >= totalDue) {
-          newStatus = "fully_paid";
-        } else if (totalPaidAfterUnvoid > 0) {
-          newStatus = "partially_paid";
-        }
+        const newStatus = computeReservationFinancials(reservation, allPaymentsForRes).paymentStatus;
 
         const reservationRef = doc(db, "reservations", reservation.id);
         await updateDoc(reservationRef, {
@@ -4008,7 +4014,7 @@ function openMaintenanceModal(roomNumber) {
     guestCheckoutEl.textContent = activeReservation.departureDate || 'N/A';
     
     // Payment status with color
-    const paymentStatus = activeReservation.paymentStatus || 'not_paid';
+    const paymentStatus = activeReservation.paymentStatus || 'unpaid';
     let paymentColor = 'var(--accent-danger)';
     let paymentText = 'Unpaid';
     if (paymentStatus === 'fully_paid' || paymentStatus === 'paid') {
@@ -5728,35 +5734,31 @@ function showEditDeletePopup(reservation) {
           .map(d => ({ id: d.id, ...d.data() }))
           .filter(p => p.reservationId === reservation.id && !p.voided);
         
-        // Calculate new total due with updated rate/dates
         const effectiveRate = newRate !== null ? newRate : oldRate;
-        const nights = calculateSpecialNights(arrivalDate, departureDate);
-        const baseTotal = effectiveRate * nights;
-        
-        // Include balance adjustments (discounts/fees)
-        const adjustments = reservation.balanceAdjustments || [];
-        const totalAdjustment = calcAdjustmentTotal(adjustments);
-        const newTotalDue = baseTotal + totalAdjustment;
-        
-        // Sum up what's been paid
-        const totalPaid = reservationPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) + calcCreditTotal(reservation.balanceCredits);
-        
-        // Determine new payment status
-        let newPaymentStatus = "not_paid";
-        if (totalPaid >= newTotalDue) {
-          newPaymentStatus = "fully_paid";
-        } else if (totalPaid > 0) {
-          newPaymentStatus = "partially_paid";
-        }
+        const updatedReservation = {
+          ...reservation,
+          rate: effectiveRate,
+          arrivalDate,
+          departureDate
+        };
+        const updatedFinancials = computeReservationFinancials(updatedReservation, reservationPayments);
+        const newTotalDue = updatedFinancials.totalDue;
+        const totalPaid = updatedFinancials.totalPaid;
+        const newPaymentStatus = updatedFinancials.paymentStatus;
         
         // Add payment status to update
         updateData.paymentStatus = newPaymentStatus;
         
         // Calculate old total for comparison display
-        const oldNights = calculateSpecialNights(oldArrivalDate, oldDepartureDate);
-        const oldTotalDue = oldRate * oldNights + totalAdjustment;
-        const oldBalance = Math.max(0, oldTotalDue - totalPaid);
-        const newBalance = Math.max(0, newTotalDue - totalPaid);
+        const oldFinancials = computeReservationFinancials({
+          ...reservation,
+          rate: oldRate,
+          arrivalDate: oldArrivalDate,
+          departureDate: oldDepartureDate
+        }, reservationPayments);
+        const oldTotalDue = oldFinancials.totalDue;
+        const oldBalance = oldFinancials.outstandingBalance;
+        const newBalance = updatedFinancials.outstandingBalance;
         
         // Show user the impact of changes
         if (rateChanged || datesChanged) {
@@ -9244,22 +9246,7 @@ function showReceiptDetailModal(payment, reservation) {
             p.id !== payment.id && 
             !p.voided
           );
-          const totalPaidAfterVoid = remainingPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-          
-          // Calculate what's owed
-          const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate);
-          const baseTotal = (parseFloat(reservation.rate) || 0) * nights;
-          const adjustments = reservation.balanceAdjustments || [];
-          const totalAdjustment = calcAdjustmentTotal(adjustments);
-          const totalDue = baseTotal + totalAdjustment;
-          
-          // Determine new payment status
-          let newStatus = "not_paid";
-          if (totalPaidAfterVoid >= totalDue) {
-            newStatus = "fully_paid";
-          } else if (totalPaidAfterVoid > 0) {
-            newStatus = "partially_paid";
-          }
+          const newStatus = computeReservationFinancials(reservation, remainingPayments).paymentStatus;
           
           // Update reservation
           const reservationRef = doc(db, "reservations", reservation.id);

@@ -39,9 +39,30 @@ const dotenv = require("dotenv");
 dotenv.config();
 
 const app = express();
+const trustProxySetting = process.env.TRUST_PROXY || 1;
+
+app.set(
+  "trust proxy",
+  /^\d+$/.test(String(trustProxySetting)) ? Number.parseInt(trustProxySetting, 10) : trustProxySetting
+);
 
 /** Simple console logger with timestamp */
 const log = (...args) => console.log(`[${new Date().toISOString()}]`, ...args);
+
+function getClientIp(req) {
+  const forwardedFor = req.headers["x-forwarded-for"];
+  if (typeof forwardedFor === "string" && forwardedFor.trim()) {
+    return forwardedFor.split(",")[0].trim();
+  }
+  if (typeof req.ip === "string" && req.ip) return req.ip;
+  if (typeof req.socket?.remoteAddress === "string" && req.socket.remoteAddress) {
+    return req.socket.remoteAddress;
+  }
+  if (typeof req.connection?.remoteAddress === "string" && req.connection.remoteAddress) {
+    return req.connection.remoteAddress;
+  }
+  return "unknown";
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // SECTION 2: SECURITY MIDDLEWARE
@@ -49,15 +70,15 @@ const log = (...args) => console.log(`[${new Date().toISOString()}]`, ...args);
 
 /** Rate limiting - in-memory implementation */
 const rateLimitMap = new Map();
-const RATE_LIMIT_WINDOW = 60000; // 1 minute
-const RATE_LIMIT_MAX = 300;      // max requests per window (increased for testing)
+const RATE_LIMIT_WINDOW = Number.parseInt(process.env.RATE_LIMIT_WINDOW_MS || "60000", 10);
+const RATE_LIMIT_MAX = Number.parseInt(process.env.RATE_LIMIT_MAX || "240", 10);
 
 /**
  * Rate limiting middleware
  * Limits requests per IP address to prevent abuse
  */
 function rateLimit(req, res, next) {
-  const ip = req.ip || req.connection.remoteAddress || 'unknown';
+  const ip = getClientIp(req);
   const now = Date.now();
   
   if (!rateLimitMap.has(ip)) {
@@ -230,7 +251,7 @@ function trackSuspiciousActivity(ip, score = 1) {
  * Middleware to block requests from banned IPs
  */
 function ipBlockingMiddleware(req, res, next) {
-  const ip = req.ip || req.connection.remoteAddress || 'unknown';
+  const ip = getClientIp(req);
   
   if (blockedIPs.has(ip)) {
     log(`[SECURITY] Blocked request from banned IP: ${ip}`);
@@ -251,7 +272,7 @@ function ipBlockingMiddleware(req, res, next) {
  * Checks URL and request body for common attack signatures
  */
 function validateRequestMiddleware(req, res, next) {
-  const ip = req.ip || req.connection.remoteAddress || 'unknown';
+  const ip = getClientIp(req);
   
   // Check for suspicious headers
   const userAgent = req.headers['user-agent'] || '';
@@ -300,7 +321,7 @@ function validateRequestMiddleware(req, res, next) {
  */
 function auditLogMiddleware(req, res, next) {
   const startTime = Date.now();
-  const ip = req.ip || req.connection.remoteAddress || 'unknown';
+  const ip = getClientIp(req);
   
   res.on('finish', () => {
     const duration = Date.now() - startTime;
@@ -443,6 +464,7 @@ app.use(
 // Handle CORS preflight requests
 app.options("*", (req, res) => {
   const origin = req.headers.origin;
+  res.vary("Origin");
   if (origin && ALLOWED_ORIGINS.includes(origin)) {
     res.header("Access-Control-Allow-Origin", origin);
     res.header("Access-Control-Allow-Credentials", "true");
@@ -461,6 +483,7 @@ app.options("*", (req, res) => {
 // Add CORS headers to all responses
 app.use((req, res, next) => {
   const origin = req.headers.origin;
+  res.vary("Origin");
   if (origin && ALLOWED_ORIGINS.includes(origin)) {
     res.header("Access-Control-Allow-Origin", origin);
     res.header("Access-Control-Allow-Credentials", "true");

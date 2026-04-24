@@ -7,10 +7,10 @@
      */
     :root {
       /* Background colors */
-      --bg-primary: #0f172a;      /* Main page background */
-      --bg-secondary: #1e293b;    /* Card/container backgrounds */
-      --bg-tertiary: #334155;     /* Nested elements */
-      --bg-card: #334155;         /* Form inputs, cards */
+      --bg-primary: #101828;      /* Main page background */
+      --bg-secondary: #182230;    /* Card/container backgrounds */
+      --bg-tertiary: #223043;     /* Nested elements */
+      --bg-card: #0f172a;         /* Form inputs, cards */
       
       /* Text colors */
       --text-primary: #f8fafc;    /* Main text */
@@ -18,27 +18,27 @@
       --text-muted: #64748b;      /* Placeholder, hints */
       
       /* Border colors */
-      --border-light: #334155;    /* Subtle borders */
-      --border-medium: #475569;   /* Standard borders */
-      --border-color: #475569;    /* Alias for compatibility */
+      --border-light: #243244;    /* Subtle borders */
+      --border-medium: #334155;   /* Standard borders */
+      --border-color: #334155;    /* Alias for compatibility */
       
       /* Accent colors - same across all pages */
-      --accent-primary: #3b82f6;        /* Blue - primary actions */
-      --accent-primary-hover: #2563eb;  /* Blue hover state */
+      --accent-primary: #2563eb;        /* Blue - primary actions */
+      --accent-primary-hover: #1d4ed8;  /* Blue hover state */
       --accent-success: #10b981;        /* Green - success states */
       --accent-warning: #f59e0b;        /* Orange - warnings */
       --accent-danger: #ef4444;         /* Red - errors, delete */
       --accent-info: #06b6d4;           /* Cyan - info messages */
       
       /* Shadows */
-      --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-      --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4);
-      --shadow-lg: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+      --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.22);
+      --shadow-md: 0 6px 16px rgba(0, 0, 0, 0.28);
+      --shadow-lg: 0 18px 36px rgba(0, 0, 0, 0.34);
       
       /* Border radius - consistent with index.html */
-      --radius-sm: 6px;
-      --radius-md: 10px;
-      --radius-lg: 14px;
+      --radius-sm: 4px;
+      --radius-md: 8px;
+      --radius-lg: 12px;
       
       /* Font */
       --font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -59,7 +59,7 @@
 
     body {
       font-family: var(--font-family);
-      background: linear-gradient(135deg, var(--bg-primary) 0%, #1a365d 100%);
+      background: var(--bg-primary);
       min-height: 100vh;
       display: flex;
       align-items: center;
@@ -90,6 +90,7 @@
       width: 100%;
       max-width: 420px;
       background: var(--bg-secondary);
+      border: 1px solid var(--border-light);
       border-radius: var(--radius-lg);
       box-shadow: var(--shadow-lg);
       overflow: hidden;
@@ -108,7 +109,7 @@
       align-items: center;
       justify-content: center;
       z-index: 1000;
-      background: linear-gradient(135deg, var(--bg-primary) 0%, #1a365d 100%);
+      background: var(--bg-primary);
     }
 
     .auth-checking-overlay.show {
@@ -139,15 +140,16 @@
       flex-direction: column;
       align-items: center;
       padding: 40px 32px 24px;
-      background: linear-gradient(135deg, var(--accent-primary) 0%, #1d4ed8 100%);
+      background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border-light);
       text-align: center;
     }
 
     .login-header .logo {
       width: 72px;
       height: 72px;
-      background: rgba(255,255,255,0.15);
-      border-radius: 50%;
+      background: var(--accent-primary);
+      border-radius: var(--radius-md);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -162,13 +164,13 @@
     .login-header h1 {
       font-size: 1.5rem;
       font-weight: 600;
-      color: white;
+      color: var(--text-primary);
       margin-bottom: 4px;
     }
 
     .login-header p {
       font-size: 0.875rem;
-      color: rgba(255,255,255,0.8);
+      color: var(--text-secondary);
     }
 
     /* ═══════════════════════════════════════════════════════════════
@@ -194,7 +196,7 @@
 
     .auth-tab:hover {
       color: var(--text-primary);
-      background: rgba(255,255,255,0.05);
+      background: var(--bg-card);
     }
 
     .auth-tab.active {
@@ -380,15 +382,15 @@
 
     /* Primary button - main action (Sign In, Create Account) */
     .btn-primary {
-      background: linear-gradient(135deg, var(--accent-primary), #2563eb);
+      background: var(--accent-primary);
       color: white;
-      box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3);
+      box-shadow: 0 2px 6px rgba(37, 99, 235, 0.28);
     }
 
     .btn-primary:hover:not(:disabled) {
-      background: linear-gradient(135deg, var(--accent-primary-hover), #1d4ed8);
+      background: var(--accent-primary-hover);
       transform: translateY(-1px);
-      box-shadow: 0 4px 8px rgba(59, 130, 246, 0.4);
+      box-shadow: 0 6px 14px rgba(29, 78, 216, 0.3);
     }
 
     .btn-primary:disabled {
@@ -405,7 +407,7 @@
     }
 
     .btn-ghost:hover {
-      background: rgba(255,255,255,0.05);
+      background: var(--bg-card);
       color: var(--text-primary);
     }
 

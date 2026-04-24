@@ -23,29 +23,29 @@
       /* ─────────────────────────────────────────────────────────────────────────
          BACKGROUND COLORS - Light Theme (default)
          ───────────────────────────────────────────────────────────────────────── */
-      --bg-primary: #f8fafc;      /* Main page background */
+      --bg-primary: #f4f6f8;      /* Main page background */
       --bg-secondary: #ffffff;    /* Card backgrounds */
-      --bg-tertiary: #f1f5f9;     /* Nested elements, hover states */
+      --bg-tertiary: #eef2f6;     /* Nested elements, hover states */
       --bg-card: #ffffff;         /* Modal/popup backgrounds */
       
       /* ─────────────────────────────────────────────────────────────────────────
          TEXT COLORS
          ───────────────────────────────────────────────────────────────────────── */
-      --text-primary: #1e293b;    /* Main text, headings */
-      --text-secondary: #475569;  /* Labels, descriptions */
-      --text-muted: #94a3b8;      /* Placeholders, hints, disabled */
+      --text-primary: #18212f;    /* Main text, headings */
+      --text-secondary: #4c5a6c;  /* Labels, descriptions */
+      --text-muted: #7b8794;      /* Placeholders, hints, disabled */
       
       /* ─────────────────────────────────────────────────────────────────────────
          BORDER COLORS
          ───────────────────────────────────────────────────────────────────────── */
-      --border-light: #e2e8f0;    /* Subtle dividers */
-      --border-medium: #cbd5e1;   /* Input borders, separators */
+      --border-light: #d8e0e7;    /* Subtle dividers */
+      --border-medium: #b9c5d1;   /* Input borders, separators */
       
       /* ─────────────────────────────────────────────────────────────────────────
          ACCENT COLORS - Used for actions and status indicators
          ───────────────────────────────────────────────────────────────────────── */
-      --accent-primary: #3b82f6;        /* Blue - primary actions, links */
-      --accent-primary-hover: #2563eb;  /* Blue hover state */
+      --accent-primary: #2563eb;        /* Blue - primary actions, links */
+      --accent-primary-hover: #1d4ed8;  /* Blue hover state */
       --accent-success: #10b981;        /* Green - success, paid, available */
       --accent-warning: #f59e0b;        /* Orange - warnings, partial paid */
       --accent-danger: #ef4444;         /* Red - errors, delete, occupied */
@@ -54,18 +54,18 @@
       /* ─────────────────────────────────────────────────────────────────────────
          SHADOWS - Depth and elevation
          ───────────────────────────────────────────────────────────────────────── */
-      --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
-      --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1);
-      --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1);
-      --shadow-xl: 0 20px 25px -5px rgba(0,0,0,0.1);
+      --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
+      --shadow-md: 0 6px 16px rgba(15, 23, 42, 0.08);
+      --shadow-lg: 0 12px 24px rgba(15, 23, 42, 0.1);
+      --shadow-xl: 0 18px 36px rgba(15, 23, 42, 0.12);
       
       /* ─────────────────────────────────────────────────────────────────────────
          BORDER RADIUS - Rounded corners
          ───────────────────────────────────────────────────────────────────────── */
-      --radius-sm: 6px;           /* Small elements (badges, tags) */
-      --radius-md: 10px;          /* Buttons, inputs */
-      --radius-lg: 14px;          /* Cards, modals */
-      --radius-xl: 20px;          /* Large containers */
+      --radius-sm: 4px;           /* Small elements (badges, tags) */
+      --radius-md: 8px;           /* Buttons, inputs */
+      --radius-lg: 12px;          /* Cards, modals */
+      --radius-xl: 16px;          /* Large containers */
       
       /* ─────────────────────────────────────────────────────────────────────────
          TYPOGRAPHY
@@ -79,20 +79,20 @@
      * ─────────────────────────────────────────────────────────────────────────────
      */
     [data-theme="dark"] {
-      --bg-primary: #0f172a;
-      --bg-secondary: #1e293b;
-      --bg-tertiary: #334155;
-      --bg-card: #1e293b;
-      --text-primary: #f1f5f9;
+      --bg-primary: #101828;
+      --bg-secondary: #182230;
+      --bg-tertiary: #223043;
+      --bg-card: #182230;
+      --text-primary: #f8fafc;
       --text-secondary: #cbd5e1;
-      --text-muted: #64748b;
-      --border-light: #334155;
-      --border-medium: #475569;
+      --text-muted: #94a3b8;
+      --border-light: #243244;
+      --border-medium: #334155;
       /* Darker shadows for dark mode */
-      --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
-      --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.4);
-      --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.4);
-      --shadow-xl: 0 20px 25px -5px rgba(0,0,0,0.4);
+      --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
+      --shadow-md: 0 6px 16px rgba(0, 0, 0, 0.3);
+      --shadow-lg: 0 12px 24px rgba(0, 0, 0, 0.35);
+      --shadow-xl: 0 18px 36px rgba(0, 0, 0, 0.4);
     }
 
     /* ═══════════════════════════════════════════════════════════════════════════
@@ -107,21 +107,11 @@
     body {
       font-family: var(--font-family);
       background: var(--bg-primary);
-      background-image: 
-        radial-gradient(circle at 25% 25%, rgba(99, 102, 241, 0.03) 0%, transparent 50%),
-        radial-gradient(circle at 75% 75%, rgba(139, 92, 246, 0.03) 0%, transparent 50%);
-      background-attachment: fixed;
       color: var(--text-primary);
       min-height: 100vh;
-      transition: background 0.3s ease, color 0.3s ease;
+      transition: background-color 0.2s ease, color 0.2s ease;
       /* Performance: GPU acceleration for smooth scrolling */
       -webkit-overflow-scrolling: touch;
-    }
-    
-    [data-theme="dark"] body {
-      background-image: 
-        radial-gradient(circle at 25% 25%, rgba(99, 102, 241, 0.05) 0%, transparent 50%),
-        radial-gradient(circle at 75% 75%, rgba(139, 92, 246, 0.05) 0%, transparent 50%);
     }
 
     /* ═══════════════════════════════════════════════════════════════
@@ -174,7 +164,7 @@
     .auth-loading-overlay {
       position: fixed;
       inset: 0;
-      background: #0f172a;
+      background: #182230;
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -233,8 +223,8 @@
     }
 
     [data-theme="dark"] .gh-header {
-      background: rgba(30, 41, 59, 0.95);
-      box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05);
+      background: var(--bg-card);
+      box-shadow: none;
     }
 
     .header-content {
@@ -505,7 +495,7 @@
       border-radius: var(--radius-lg);
       padding: 20px;
       border: 1px solid var(--border-light);
-      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
       position: relative;
       overflow: hidden;
       /* GPU acceleration */
@@ -514,28 +504,16 @@
     }
 
     .stat-card::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      height: 4px;
-      background: var(--accent-primary);
-      opacity: 0;
-      transition: opacity 0.3s ease;
+      display: none;
     }
 
     .stat-card:hover {
-      transform: translateZ(0);
-      border-color: var(--accent-primary);
-    }
-
-    .stat-card:hover::before {
-      opacity: 1;
+      border-color: var(--border-medium);
+      box-shadow: var(--shadow-md);
     }
 
     [data-theme="dark"] .stat-card:hover {
-      box-shadow: 0 12px 24px rgba(0, 0, 0, 0.4);
+      box-shadow: var(--shadow-md);
     }
 
     .stat-card-header {
@@ -557,7 +535,7 @@
     }
 
     .stat-card:hover .stat-icon {
-      transform: scale(1.1) rotate(5deg);
+      transform: none;
     }
 
     .stat-icon.blue { 
