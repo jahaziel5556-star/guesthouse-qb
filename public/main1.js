@@ -656,6 +656,22 @@ function computeReservationFinancials(reservation, payments = window._allPayment
   };
 }
 
+function formatPaymentMethodLabel(method) {
+  const normalizedMethod = String(method || '').trim().toLowerCase();
+  if (!normalizedMethod) return 'N/A';
+
+  const paymentMethodLabels = {
+    cash: 'Cash',
+    card: 'Card',
+    cheque: 'Cheque',
+    check: 'Cheque',
+    mobile: 'Mobile Banking'
+  };
+
+  return paymentMethodLabels[normalizedMethod]
+    || normalizedMethod.replace(/\b\w/g, char => char.toUpperCase());
+}
+
 /**
  * computeLivePaymentStatus — single source of truth for payment status.
  *
@@ -2804,7 +2820,7 @@ async function openManagePaymentModal(reservation) {
   allPayments.forEach(p => {
     const div = document.createElement("div");
     div.className = "payment-entry";
-    const methodDisplay = p.method ? p.method.charAt(0).toUpperCase() + p.method.slice(1) : "N/A";
+    const methodDisplay = formatPaymentMethodLabel(p.method);
     const isVoided = p.voided === true;
     
     // QB sync status indicator
@@ -3365,7 +3381,7 @@ if (summaryBtn) {
         const normalizedTs = normalizeTimestamp(p.timestamp);
         const paymentDate = normalizedTs ? formatDateDMY(normalizedTs) : 'N/A';
         const paymentTime = normalizedTs ? new Date(normalizedTs).toLocaleTimeString() : 'N/A';
-        const paymentMethod = p.method ? p.method.charAt(0).toUpperCase() + p.method.slice(1) : 'N/A';
+        const paymentMethod = formatPaymentMethodLabel(p.method);
         
         return `
           <tr>
@@ -4830,15 +4846,11 @@ document.getElementById("confirmPaymentBtn")?.addEventListener("click", async ()
     // Calculate total paid from cache + newly saved payment (not in cache yet)
     const cachedPayments = (window._allPaymentsCache || [])
       .filter(p => p.reservationId === latestReservationId && !p.voided);
-
-    const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate);
-    const baseTotal = (parseFloat(reservation.rate) || 0) * nights;
-    // Include balance adjustments (usually empty for new reservations)
-    const adjustments = reservation.balanceAdjustments || [];
-    const totalAdjustment = calcAdjustmentTotal(adjustments);
-    const totalDue = baseTotal + totalAdjustment;
-    const totalPaid = cachedPayments.reduce((s, p) => s + parseFloat(p.amount || 0), 0) + amount;
-    const newStatus = totalPaid >= totalDue ? "fully_paid" : "partially_paid";
+    const newPayment = { amount, voided: false };
+    const financials = computeReservationFinancials(reservation, [...cachedPayments, newPayment]);
+    const totalDue = financials.totalDue;
+    const totalPaid = financials.totalPaid;
+    const newStatus = financials.paymentStatus;
 
     await updateDoc(doc(db, "reservations", latestReservationId), {
       paymentStatus: newStatus,
@@ -5052,19 +5064,12 @@ document.getElementById("idUploadInput")?.addEventListener("change", function (e
 
   // Sort ASCENDING (oldest first) so running balance subtracts in correct order
   const sortedPayments = relatedPayments.sort(comparePaymentsByTime);
-  const rate = parseFloat(reservation.rate || 0);
   const arrival = new Date(reservation.arrivalDate);
   const departure = new Date(reservation.departureDate);
-  const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate);
-  const baseTotal = (parseFloat(reservation.rate) || 0) * nights;
-  // Include balance adjustments
-  const adjustments = reservation.balanceAdjustments || [];
-  const totalAdjustment = calcAdjustmentTotal(adjustments);
-  const totalDue = baseTotal + totalAdjustment;
-  const actualPaid = relatedPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-  const creditTotal = calcCreditTotal(reservation.balanceCredits);
-  const totalPaid = actualPaid + creditTotal;
-  let balanceRemaining = Math.max(0, totalDue - totalPaid);
+  const previewFinancials = computeReservationFinancials(reservation, relatedPayments);
+  const totalDue = previewFinancials.totalDue;
+  const totalPaid = previewFinancials.totalPaid;
+  let balanceRemaining = previewFinancials.outstandingBalance;
   if (balanceRemaining < 0) balanceRemaining = 0;
 
 
@@ -6498,23 +6503,17 @@ async function showReceiptDetails(receiptNumber) {
   let balance = 0;
   
   if (reservation) {
-    const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate);
-    const baseTotal = (parseFloat(reservation.rate) || 0) * nights;
-    // Include balance adjustments
-    const adjustments = reservation.balanceAdjustments || [];
-    const totalAdjustment = calcAdjustmentTotal(adjustments);
-    totalDue = baseTotal + totalAdjustment;
-    // Filter out voided payments
     const resPayments = allPayments.filter(p => p.reservationId === reservation.id && !p.voided);
-    const actualPaid = resPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-    totalPaid = actualPaid + calcCreditTotal(reservation.balanceCredits);
-    balance = Math.max(0, totalDue - totalPaid);
+    const financials = computeReservationFinancials(reservation, resPayments);
+    totalDue = financials.totalDue;
+    totalPaid = financials.totalPaid;
+    balance = financials.outstandingBalance;
   }
   
   // Format date/time
   const paymentDate = payment.timestamp ? formatDateDMY(payment.timestamp) : 'N/A';
   const paymentTime = payment.timestamp ? new Date(payment.timestamp).toLocaleTimeString() : 'N/A';
-  const paymentMethod = payment.method ? payment.method.charAt(0).toUpperCase() + payment.method.slice(1) : 'N/A';
+  const paymentMethod = formatPaymentMethodLabel(payment.method);
   
   // Create popup
   const popup = document.createElement("div");
@@ -7023,7 +7022,7 @@ function showBatchCloseSessionDetails(session, sessionNumber) {
                   <span style="color:#10b981; font-weight:600;">$${parseFloat(p.amount || 0).toFixed(2)}</span>
                 </div>
                 <div style="font-size:0.85em; color:#64748b; margin-top:4px;">
-                  ${(p.method || 'cash').charAt(0).toUpperCase() + (p.method || 'cash').slice(1)} • By ${p.recordedByName || p.recordedBy || 'Unknown'}
+                  ${formatPaymentMethodLabel(p.method || 'cash')} • By ${p.recordedByName || p.recordedBy || 'Unknown'}
                 </div>
               </div>
             `).join('') : '<div style="padding:20px; text-align:center; color:#888;">No payments</div>'}
@@ -7129,7 +7128,7 @@ function printHistorySession() {
             <tr>
               <td>#${p.receiptNumber || 'N/A'}</td>
               <td class="text-right">$${parseFloat(p.amount || 0).toFixed(2)}</td>
-              <td>${(p.method || 'cash').charAt(0).toUpperCase() + (p.method || 'cash').slice(1)}</td>
+              <td>${formatPaymentMethodLabel(p.method || 'cash')}</td>
               <td>${p.recordedByName || p.recordedBy || 'Unknown'}</td>
             </tr>
           `).join('') : '<tr><td colspan="4" style="text-align:center;">No payments</td></tr>'}
@@ -7370,17 +7369,8 @@ document.getElementById('generateBatchCloseBtn')?.addEventListener('click', asyn
   const allPaymentsForBalance = [...(window._allPaymentsCache || [])].filter(p => !p.voided);
 
   periodReservations.forEach(res => {
-    const nights = calculateSpecialNights(res.arrivalDate, res.departureDate);
-    const baseTotal = (parseFloat(res.rate) || 0) * nights;
-    // Include balance adjustments
-    const adjustments = res.balanceAdjustments || [];
-    const totalAdjustment = calcAdjustmentTotal(adjustments);
-    const totalDue = baseTotal + totalAdjustment;
-    // Use ALL payments for accurate balance (not filtered by staff)
     const resPayments = allPaymentsForBalance.filter(p => p.reservationId === res.id);
-    const actualPaid = resPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-    const totalPaid = actualPaid + calcCreditTotal(res.balanceCredits);
-    totalOutstanding += Math.max(0, totalDue - totalPaid);
+    totalOutstanding += computeReservationFinancials(res, resPayments).outstandingBalance;
 
     if (res.checkedOut) checkedOutCount++;
     else if (res.checkedIn) checkedInCount++;
@@ -7473,17 +7463,16 @@ document.getElementById('generateBatchCloseBtn')?.addEventListener('click', asyn
 
   for (const res of periodReservations) {
     const customer = customers.find(c => c.id === res.customerId) || {};
-    const nights = calculateSpecialNights(res.arrivalDate, res.departureDate);
-    const baseTotal = (parseFloat(res.rate) || 0) * nights;
-    // Include balance adjustments
-    const adjustments = res.balanceAdjustments || [];
-    const totalAdjustment = calcAdjustmentTotal(adjustments);
-    const totalDue = baseTotal + totalAdjustment;
     // All payments (excluding voided) for balance calculation - use unfiltered cache
     const allPaymentsForBalance = [...(window._allPaymentsCache || [])].filter(p => !p.voided);
     const allResPayments = allPaymentsForBalance.filter(p => p.reservationId === res.id);
-    const totalPaidAllTime = allResPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) + calcCreditTotal(res.balanceCredits);
-    const balance = Math.max(0, totalDue - totalPaidAllTime);
+    const financials = computeReservationFinancials(res, allResPayments);
+    const {
+      nights,
+      totalDue,
+      totalPaid: totalPaidAllTime,
+      outstandingBalance: balance
+    } = financials;
     
     // Period payments only - what was paid during this report period
     const periodResPayments = periodPaymentsByResId.get(res.id) || [];
@@ -7495,7 +7484,7 @@ document.getElementById('generateBatchCloseBtn')?.addEventListener('click', asyn
       paymentDetailsHtml = periodResPayments.map(p => {
         const paymentDate = BatchCloseUtils.parseTimestamp(p.timestamp);
         const dateStr = paymentDate ? BatchCloseUtils.formatDisplayDate(paymentDate) : 'N/A';
-        const method = (p.method || 'cash').charAt(0).toUpperCase() + (p.method || 'cash').slice(1);
+        const method = formatPaymentMethodLabel(p.method || 'cash');
         // Get recorder name - prefer recordedByName, fallback to lookup, then UID
         let recorderName = '';
         if (p.recordedByName && p.recordedByName !== 'Unknown') {
@@ -7720,16 +7709,15 @@ document.getElementById('downloadBatchCloseCsvBtn')?.addEventListener('click', (
 
   for (const res of periodReservations) {
     const customer = customers.find(c => c.id === res.customerId) || {};
-    const nights = calculateSpecialNights(res.arrivalDate, res.departureDate);
-    const baseTotal = (parseFloat(res.rate) || 0) * nights;
-    // Include balance adjustments
-    const adjustments = res.balanceAdjustments || [];
-    const totalAdjustment = calcAdjustmentTotal(adjustments);
-    const totalDue = baseTotal + totalAdjustment;
     // Filter out voided payments
     const resPay = allPayments.filter(p => p.reservationId === res.id && !p.voided);
-    const totalPaid = resPay.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) + calcCreditTotal(res.balanceCredits);
-    const balance = Math.max(0, totalDue - totalPaid);
+    const financials = computeReservationFinancials(res, resPay);
+    const {
+      nights,
+      totalDue,
+      totalPaid,
+      outstandingBalance: balance
+    } = financials;
 
     // Get period payments with details
     const periodPayments = resPay.filter(p => {
@@ -7745,7 +7733,7 @@ document.getElementById('downloadBatchCloseCsvBtn')?.addEventListener('click', (
       const payDate = BatchCloseUtils.parseTimestamp(p.timestamp);
       const dateStr = payDate ? BatchCloseUtils.formatDisplayDate(payDate) : 'N/A';
       const recorderName = p.recordedByName || '(Legacy)';
-      return `#${p.receiptNumber} $${parseFloat(p.amount).toFixed(2)} ${p.method || 'cash'} ${dateStr} by ${recorderName}`;
+      return `#${p.receiptNumber} $${parseFloat(p.amount).toFixed(2)} ${formatPaymentMethodLabel(p.method || 'cash')} ${dateStr} by ${recorderName}`;
     }).join('; ') || 'None';
 
     // Compute status from live payments (never trust stale paymentStatus field)
@@ -9079,7 +9067,7 @@ async function showTransactionsModal(customer) {
       div.style.marginBottom = "8px";
       div.style.borderRadius = "6px";
       div.style.transition = "background 0.2s";
-      const methodDisplay = p.method ? p.method.charAt(0).toUpperCase() + p.method.slice(1) : 'N/A';
+      const methodDisplay = formatPaymentMethodLabel(p.method);
       div.innerHTML = `
         <div style="display:flex;justify-content:space-between;align-items:center;">
           <span><strong>Receipt #${p.receiptNumber}</strong></span>
@@ -9122,23 +9110,17 @@ function showReceiptDetailModal(payment, reservation) {
   let balance = 0;
   
   if (reservation) {
-    const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate);
-    const baseTotal = (parseFloat(reservation.rate) || 0) * nights;
-    // Include balance adjustments
-    const adjustments = reservation.balanceAdjustments || [];
-    const totalAdjustment = calcAdjustmentTotal(adjustments);
-    totalDue = baseTotal + totalAdjustment;
-    // Filter out voided payments
     const resPayments = (window._allPaymentsCache || []).filter(p => p.reservationId === reservation.id && !p.voided);
-    const actualPaid = resPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-    totalPaid = actualPaid + calcCreditTotal(reservation.balanceCredits);
-    balance = Math.max(0, totalDue - totalPaid);
+    const financials = computeReservationFinancials(reservation, resPayments);
+    totalDue = financials.totalDue;
+    totalPaid = financials.totalPaid;
+    balance = financials.outstandingBalance;
   }
   
   // Format date/time
   const paymentDate = payment.timestamp ? formatDateDMY(payment.timestamp) : 'N/A';
   const paymentTime = payment.timestamp ? new Date(payment.timestamp).toLocaleTimeString() : 'N/A';
-  const paymentMethod = payment.method ? payment.method.charAt(0).toUpperCase() + payment.method.slice(1) : 'N/A';
+  const paymentMethod = formatPaymentMethodLabel(payment.method);
   
   // Create popup (same style as showReceiptDetails)
   const popup = document.createElement("div");
@@ -10114,14 +10096,8 @@ document.getElementById("printReceiptsBtn")?.addEventListener("click", () => {
           }
           // Use ALL non-voided payments for this reservation (not just filtered batch)
           const resPayments = allPaymentsByRes[p.reservationId] || [];
-          const totalPaid = resPayments.reduce((sum, pay) => sum + parseFloat(pay.amount || 0), 0) + calcCreditTotal(reservation.balanceCredits);
-          // Use reservation.rate (not payment's rate) for consistent total
-          const baseTotal = (parseFloat(reservation.rate) || parseFloat(p.rate) || 0) * nights;
-          // Include balance adjustments
-          const adjustments = reservation.balanceAdjustments || [];
-          const totalAdjustment = calcAdjustmentTotal(adjustments);
-          const totalDue = baseTotal + totalAdjustment;
-          let balance = Math.max(0, totalDue - totalPaid);
+          const financials = computeReservationFinancials(reservation, resPayments);
+          let balance = financials.outstandingBalance;
           if (isNaN(balance)) balance = 0;
           const roomNumber = reservation.roomNumber || p.roomNumber || "-";
           let stayDuration = "-";
@@ -10154,7 +10130,7 @@ document.getElementById("printReceiptsBtn")?.addEventListener("click", () => {
             <div><strong>Room #:</strong> ${roomNumber}</div>
             <div><strong>Receipt Date:</strong> ${formatDateTimeDMY(p.timestamp)}</div>
             <div><strong>Stay Duration:</strong> ${stayDuration}</div>
-            <div><strong>Payment Method:</strong> ${p.method ? p.method.charAt(0).toUpperCase() + p.method.slice(1) : 'Cash'}</div>
+            <div><strong>Payment Method:</strong> ${formatPaymentMethodLabel(p.method || 'cash')}</div>
             <div><strong>Amount Paid:</strong> $${parseFloat(p.amount).toFixed(2)}</div>
             <div><strong>Balance:</strong> $${balance.toFixed(2)}</div>
           </div>`;
@@ -10347,14 +10323,8 @@ document.getElementById("generateReceiptsBtn")?.addEventListener("click", async 
       }
       // Use ALL non-voided payments for this reservation (not just filtered batch)
       const resPayments = allPaymentsByRes[p.reservationId] || [];
-      const totalPaid = resPayments.reduce((sum, pay) => sum + parseFloat(pay.amount || 0), 0) + calcCreditTotal(reservation.balanceCredits);
-      // Use reservation.rate (not payment's rate) for consistent total
-      const baseTotal = (parseFloat(reservation.rate) || parseFloat(p.rate) || 0) * nights;
-      // Include balance adjustments
-      const adjustments = reservation.balanceAdjustments || [];
-      const totalAdjustment = calcAdjustmentTotal(adjustments);
-      const totalDue = baseTotal + totalAdjustment;
-      let balance = Math.max(0, totalDue - totalPaid);
+      const financials = computeReservationFinancials(reservation, resPayments);
+      let balance = financials.outstandingBalance;
       if (isNaN(balance)) balance = 0;
 
       // Room number fix
@@ -10445,7 +10415,7 @@ function buildReceiptsWithBalance(sortedPayments, reservation) {
       number: p.receiptNumber || "—",
       date: p.timestamp ? formatDateDMY(p.timestamp) : "—",
       amount: p.amount || "0.00",
-      method: p.method ? p.method.charAt(0).toUpperCase() + p.method.slice(1) : 'N/A',
+      method: formatPaymentMethodLabel(p.method),
       balanceAfter: balanceAfter.toFixed(2),
     };
   });
@@ -11539,23 +11509,10 @@ async function fillDashboard() {
   const activeReservations = reservations.filter(r => r.departureDate >= today);
   
   for (const reservation of activeReservations) {
-    const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate);
-    const rate = parseFloat(reservation.rate) || 0;
-    const baseTotal = rate * nights;
-    
-    // Include any balance adjustments (discounts or extra charges)
-    const adjustments = reservation.balanceAdjustments || [];
-    const totalAdjustment = calcAdjustmentTotal(adjustments);
-    const totalDue = baseTotal + totalAdjustment;
-    
-    // Subtract payments (excluding voided ones) and credits
-    const allPayments = (window._allPaymentsCache || []).filter(p => p.reservationId === reservation.id && !p.voided);
-    const actualPaid = allPayments.reduce((sum, pay) => sum + (parseFloat(pay.amount) || 0), 0);
-    const creditTotal = calcCreditTotal(reservation.balanceCredits);
-    const totalPaid = actualPaid + creditTotal;
-    
-    const bal = Math.max(0, totalDue - totalPaid);
-    totalBalanceDue += bal;
+    const reservationPayments = (window._allPaymentsCache || []).filter(
+      payment => payment.reservationId === reservation.id && !payment.voided
+    );
+    totalBalanceDue += computeReservationFinancials(reservation, reservationPayments).outstandingBalance;
   }
   const cardBalance = document.getElementById('card_balanceDue');
   if (cardBalance) cardBalance.textContent = `$${totalBalanceDue.toFixed(2)}`;
@@ -12196,23 +12153,19 @@ function printReceiptFromPayment(payment) {
   const customer = customers.find(c => c.id === payment.customerId) || {};
   
   const paymentDate = payment.timestamp ? formatDateDMY(payment.timestamp) : formatDateDMY(new Date());
-  const method = payment.method ? payment.method.charAt(0).toUpperCase() + payment.method.slice(1) : 'Cash';
+  const method = formatPaymentMethodLabel(payment.method || 'cash');
   
   // Calculate balance info for the receipt
   let totalCost = 0;
   let totalPaidAll = 0;
   let balance = 0;
   if (reservation) {
-    const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate);
-    const rate = parseFloat(reservation.rate || 0);
-    const baseTotal = rate * nights;
-    const adjustments = reservation.balanceAdjustments || [];
-    const totalAdjustment = calcAdjustmentTotal(adjustments);
-    totalCost = baseTotal + totalAdjustment;
     const resPayments = (window._allPaymentsCache || [])
       .filter(p => p.reservationId === reservation.id && !p.voided);
-    totalPaidAll = resPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) + calcCreditTotal(reservation.balanceCredits);
-    balance = Math.max(0, totalCost - totalPaidAll);
+    const financials = computeReservationFinancials(reservation, resPayments);
+    totalCost = financials.totalDue;
+    totalPaidAll = financials.totalPaid;
+    balance = financials.outstandingBalance;
   }
   
   printSingleReceipt({
@@ -12362,17 +12315,10 @@ async function openPrintRegistrationForm(reservation) {
 
   // Sort ASCENDING (oldest first) so running balance subtracts in correct order
   const sortedPayments = relatedPayments.sort(comparePaymentsByTime);
-  const rate = parseFloat(freshReservation.rate || 0);
-  const nights = calculateSpecialNights(freshReservation.arrivalDate, freshReservation.departureDate);
-  const baseTotal = rate * nights;
-  // Include balance adjustments
-  const adjustments = freshReservation.balanceAdjustments || [];
-  const totalAdjustment = calcAdjustmentTotal(adjustments);
-  const totalDue = baseTotal + totalAdjustment;
-  const actualPaid = relatedPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-  const creditTotal = calcCreditTotal(freshReservation.balanceCredits);
-  const totalPaid = actualPaid + creditTotal;
-  let balanceRemaining = Math.max(0, totalDue - totalPaid);
+  const previewFinancials = computeReservationFinancials(freshReservation, relatedPayments);
+  const totalDue = previewFinancials.totalDue;
+  const totalPaid = previewFinancials.totalPaid;
+  let balanceRemaining = previewFinancials.outstandingBalance;
   if (balanceRemaining < 0) balanceRemaining = 0;
 
   const paymentSummary = {
@@ -12409,16 +12355,10 @@ async function showRegistrationFormWithSavedId(customer) {
 
     // Sort ASCENDING (oldest first) so running balance subtracts in correct order
     const sortedPayments = relatedPayments.sort(comparePaymentsByTime);
-    const nights = calculateSpecialNights(reservation.arrivalDate, reservation.departureDate);
-    const baseTotal = (parseFloat(reservation.rate) || 0) * nights;
-    // Include balance adjustments
-    const adjustments = reservation.balanceAdjustments || [];
-    const totalAdjustment = calcAdjustmentTotal(adjustments);
-    const totalDue = baseTotal + totalAdjustment;
-    const actualPaid = relatedPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-    const creditTotal = calcCreditTotal(reservation.balanceCredits);
-    const totalPaid = actualPaid + creditTotal;
-    const balanceRemaining = Math.max(0, totalDue - totalPaid);
+    const previewFinancials = computeReservationFinancials(reservation, relatedPayments);
+    const totalDue = previewFinancials.totalDue;
+    const totalPaid = previewFinancials.totalPaid;
+    const balanceRemaining = previewFinancials.outstandingBalance;
 
     const paymentSummary = {
       totalPaid,
@@ -12453,23 +12393,10 @@ async function showFormPreview(reservation, customer, idImageUrl) {
   // Sort payments by timestamp ASCENDING (oldest first) for proper running balance
   const sortedPayments = relatedPayments.sort(comparePaymentsByTime);
 
-  const rate = parseFloat(freshReservation.rate || 0);
-  const nights = calculateSpecialNights(
-    freshReservation.arrivalDate,
-    freshReservation.departureDate
-  );
-  const baseTotal = rate * nights;
-  // Include balance adjustments
-  const adjustments = freshReservation.balanceAdjustments || [];
-  const totalAdjustment = calcAdjustmentTotal(adjustments);
-  const totalDue = baseTotal + totalAdjustment;
-  const actualPaid = relatedPayments.reduce(
-    (sum, p) => sum + parseFloat(p.amount || 0),
-    0
-  );
-  const creditTotal = calcCreditTotal(freshReservation.balanceCredits);
-  const totalPaid = actualPaid + creditTotal;
-  const balanceRemaining = Math.max(0, totalDue - totalPaid);
+  const previewFinancials = computeReservationFinancials(freshReservation, relatedPayments);
+  const totalDue = previewFinancials.totalDue;
+  const totalPaid = previewFinancials.totalPaid;
+  const balanceRemaining = previewFinancials.outstandingBalance;
 
   const paymentSummary = {
     totalPaid,
